@@ -1,9 +1,14 @@
-use std::{collections::HashMap, convert::TryInto, sync::Arc};
-use async_std::future;
+mod log;
+mod param;
+
+pub use crate::log::Log;
+pub use crate::param::Param;
+
+use std::{collections::HashMap, sync::Arc};
 use crazyflie_link::Packet;
 use flume as channel;
 use flume::{Sender, Receiver};
-use futures::channel::oneshot::channel;
+use async_trait::async_trait;
 
 pub struct Crazyflie {
     uplink: channel::Sender<Packet>,
@@ -40,15 +45,15 @@ impl Crazyflie {
             }
         });
 
-        // Create subsystem one by one
+        // Create subsystems one by one
         // The future is passed to join!() later down so that all modules initializes at the same time
-
         let log_downlink = dispatcher.get_port_receiver(5).unwrap();
         let log = Log::new(log_downlink, uplink.clone());
 
         let param_downlink = dispatcher.get_port_receiver(12).unwrap();
         let param = Param::new(param_downlink, uplink.clone());
 
+        // Start the downlink packet dispatcher
         dispatcher.run().await;
 
         // Intitialize all modules in parallel
@@ -104,100 +109,23 @@ impl CrtpDispatch {
     }
 }
 
-pub struct Log{
-    uplink: channel::Sender<Packet>,
-    toc_downlink: channel::Receiver<Packet>,
-    toc: HashMap<(String, String), u16>,
+#[async_trait]
+trait WaitForPacket {
+    async fn wait_packet(&self, port: u8, channel: u8, data_prefix: &[u8]) -> Packet;
 }
 
-impl Log {
-    async fn new(downlink: channel::Receiver<Packet>, uplink: channel::Sender<Packet>) -> Self {
-
-        let (tx, toc_downlink) = channel::unbounded();
-        async_std::task::spawn(async move {
-            loop {
-                let packet = downlink.recv_async().await;
-                if let Ok(packet) = packet {
-                    if packet.get_channel() == 0 {
-                        let _ = tx.send_async(packet).await;
-                    }
-                } else {
-                    break;
-                }
-            }
-        });
-
-        let mut log = Self {
-            uplink,
-            toc_downlink,
-            toc: HashMap::new(),
-        };
-
-        log.fetch_toc().await;
-
-        log
-    }
-
-    async fn fetch_toc(&mut self) {
-        println!("Sending log request ...");
-        let pk = Packet::new(5, 0, vec![0x03]);
-        self.uplink.send_async(pk).await.unwrap();
-
-        let mut pk = self.toc_downlink.recv_async().await.unwrap();
+#[async_trait]
+impl WaitForPacket for channel::Receiver<Packet> {
+    async fn wait_packet(&self, port: u8, channel: u8, data_prefix: &[u8]) -> Packet {
+        let mut pk = self.recv_async().await.unwrap();
 
         loop {
-            if pk.get_port() == 0x05 && pk.get_channel() == 0 && pk.get_data()[0] == 0x03 {
+            if pk.get_port() == port && pk.get_channel() == channel && pk.get_data().starts_with(data_prefix) {
                 break;
             }
-            pk = self.toc_downlink.recv_async().await.unwrap();
+            pk = self.recv_async().await.unwrap();
         }
 
-        let toc_len = u16::from_le_bytes(pk.get_data()[1..3].try_into().unwrap());
-
-        println!("Log len: {}", toc_len);
-
-
-        for i in 0..toc_len {
-            let pk = Packet::new(5, 0, vec![0x02, (i&0x0ff) as u8, (i>>8) as u8]);
-            self.uplink.send_async(pk).await.unwrap();
-            
-            let mut pk = self.toc_downlink.recv_async().await.unwrap();
-
-            loop {
-                if pk.get_port() == 0x05 && pk.get_channel() == 0 && pk.get_data()[0] == 0x02 {
-                    break;
-                }
-                pk = self.toc_downlink.recv_async().await.unwrap();
-            }
-
-            let mut strings = pk.get_data()[4..].split(|b| *b == 0);
-            let group = String::from_utf8_lossy(strings.next().expect("TOC packet format error"));
-            let name = String::from_utf8_lossy(strings.next().expect("TOC packet format error"));
-            println!("{}.{}", group, name);
-        }
-    }
-}
-
-pub struct Param{
-    uplink: channel::Sender<Packet>,
-    downlink: channel::Receiver<Packet>,
-    toc: Vec<String>,
-}
-
-impl Param {
-    async fn new(downlink: channel::Receiver<Packet>, uplink: channel::Sender<Packet>) -> Self {
-        let mut param = Self {
-            uplink,
-            downlink,
-            toc: Vec::new(),
-        };
-
-        param.fetch_toc().await;
-
-        param
-    }
-
-    async fn fetch_toc(&mut self) {
-
+        pk
     }
 }
