@@ -1,0 +1,16 @@
+[package]
+name = "crazyflie-lib"
+version = "0.1.0"
+authors = ["Arnaud Taffanel <arnaud@bitcraze.io>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+crazyflie-link = { version = "*", path = "../crazyflie-link-rs/crazyflie-link" }
+async_executors = "0.4.1"
+futures-util = "0.3.14"
+async-std = { version = "1.9.0", features = ["attributes"] }
+futures = "0.3.14"
+async-stream = "0.3.1"
+flume = "0.10.5"
