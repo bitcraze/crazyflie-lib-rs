@@ -1,6 +1,6 @@
+use async_executors::AsyncStd;
 use crazyflie_lib::Crazyflie;
 use crazyflie_link::LinkContext;
-use async_executors::AsyncStd;
 use std::sync::Arc;
 
 #[async_std::main]
