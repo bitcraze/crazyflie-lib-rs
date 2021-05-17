@@ -1,6 +1,8 @@
+mod error;
 mod log;
 mod param;
 
+pub use crate::error::Error;
 pub use crate::log::Log;
 pub use crate::param::Param;
 
@@ -8,8 +10,13 @@ use async_trait::async_trait;
 use crazyflie_link::Packet;
 use flume as channel;
 use flume::{Receiver, Sender};
-use std::{collections::HashMap, convert::TryInto, sync::Arc};
+use std::{
+    collections::HashMap,
+    convert::{TryFrom, TryInto},
+    sync::Arc,
+};
 
+#[derive(Debug)]
 pub struct Crazyflie {
     uplink: channel::Sender<Packet>,
     pub log: Log,
@@ -31,12 +38,8 @@ impl Crazyflie {
         // Uplink queue
         let (uplink, rx) = channel::unbounded();
         async_std::task::spawn(async move {
-            loop {
-                if let Ok(pk) = rx.recv_async().await {
-                    if let Err(_) = link.send_packet(pk).await {
-                        break;
-                    }
-                } else {
+            while let Ok(pk) = rx.recv_async().await {
+                if link.send_packet(pk).await.is_err() {
                     break;
                 }
             }
@@ -74,6 +77,7 @@ impl CrtpDispatch {
         }
     }
 
+    #[allow(clippy::map_entry)]
     fn get_port_receiver(&mut self, port: u8) -> Option<Receiver<Packet>> {
         if self.port_channels.contains_key(&port) {
             None
@@ -128,11 +132,15 @@ const TOC_CHANNEL: u8 = 0;
 const TOC_GET_ITEM: u8 = 2;
 const TOC_INFO: u8 = 3;
 
-async fn fetch_toc<T: From<u8>>(
+async fn fetch_toc<T, E>(
     port: u8,
     uplink: channel::Sender<Packet>,
     downlink: channel::Receiver<Packet>,
-) -> std::collections::HashMap<String, (u16, T)> {
+) -> std::collections::HashMap<String, (u16, T)>
+where
+    T: TryFrom<u8, Error = E>,
+    E: std::fmt::Debug,
+{
     println!("Sending log request ...");
     let pk = Packet::new(port, 0, vec![TOC_INFO]);
     uplink.send_async(pk).await.unwrap();
@@ -161,9 +169,93 @@ async fn fetch_toc<T: From<u8>>(
 
         // println!("{}: {}.{}", port, &group, &name);
         let id = u16::from_le_bytes(pk.get_data()[1..3].try_into().unwrap());
-        let item_type = pk.get_data()[3].into();
+        let item_type = pk.get_data()[3].try_into().unwrap();
         toc.insert(format!("{}.{}", group, name), (id, item_type));
     }
 
     toc
+}
+
+pub struct CrtpChannelDispatcher {
+    senders: Vec<channel::Sender<Packet>>,
+    receivers: Vec<channel::Receiver<Packet>>,
+    downlink: channel::Receiver<Packet>,
+}
+
+impl CrtpChannelDispatcher {
+    pub fn new(downlink: channel::Receiver<Packet>) -> Self {
+        let (mut senders, mut receivers) = (Vec::new(), Vec::new());
+
+        for _ in 0..4 {
+            let (tx, rx) = channel::unbounded();
+            senders.push(tx);
+            receivers.insert(0, rx);
+        }
+
+        Self {
+            senders,
+            receivers,
+            downlink,
+        }
+    }
+
+    pub async fn launch(
+        self,
+    ) -> (
+        Receiver<Packet>,
+        Receiver<Packet>,
+        Receiver<Packet>,
+        Receiver<Packet>,
+    ) {
+        let mut receivers = self.receivers;
+        let senders = self.senders;
+        let downlink = self.downlink;
+
+        async_std::task::spawn(async move {
+            while let Ok(pk) = downlink.recv_async().await {
+                if pk.get_channel() < 4 {
+                    let _ = senders[pk.get_channel() as usize].send_async(pk).await;
+                }
+            }
+        });
+
+        (
+            receivers.pop().unwrap(),
+            receivers.pop().unwrap(),
+            receivers.pop().unwrap(),
+            receivers.pop().unwrap(),
+        )
+    }
+}
+
+pub fn crtp_channel_dispatcher(
+    downlink: channel::Receiver<Packet>,
+) -> (
+    Receiver<Packet>,
+    Receiver<Packet>,
+    Receiver<Packet>,
+    Receiver<Packet>,
+) {
+    let (mut senders, mut receivers) = (Vec::new(), Vec::new());
+
+    for _ in 0..4 {
+        let (tx, rx) = channel::unbounded();
+        senders.push(tx);
+        receivers.insert(0, rx);
+    }
+
+    async_std::task::spawn(async move {
+        while let Ok(pk) = downlink.recv_async().await {
+            if pk.get_channel() < 4 {
+                let _ = senders[pk.get_channel() as usize].send_async(pk).await;
+            }
+        }
+    });
+
+    (
+        receivers.pop().unwrap(),
+        receivers.pop().unwrap(),
+        receivers.pop().unwrap(),
+        receivers.pop().unwrap(),
+    )
 }

@@ -1,22 +1,20 @@
-use crate::WaitForPacket;
-use async_trait::async_trait;
 use crazyflie_link::Packet;
 use flume as channel;
 use std::collections::HashMap;
-use std::convert::TryInto;
 
 #[repr(u8)]
 #[derive(Debug)]
 enum LogItemType {
-    FLOAT = 0,
+    Float = 0,
 }
 
 impl From<u8> for LogItemType {
     fn from(_: u8) -> Self {
-        LogItemType::FLOAT
+        LogItemType::Float
     }
 }
 
+#[derive(Debug)]
 pub struct Log {
     uplink: channel::Sender<Packet>,
     toc: HashMap<String, (u16, LogItemType)>,
@@ -44,10 +42,7 @@ impl Log {
         });
 
         let toc = crate::fetch_toc(LOG_PORT, uplink.clone(), toc_downlink).await;
-        dbg!(&toc);
 
-        let log = Self { uplink, toc };
-
-        log
+        Self { uplink, toc }
     }
 }
