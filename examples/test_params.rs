@@ -7,7 +7,20 @@ use std::sync::Arc;
 async fn main() {
     let context = LinkContext::new(Arc::new(AsyncStd));
     let crazyflie = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await;
-    dbg!(&crazyflie);
+
+    let param_names = crazyflie.param.names();
+
+    println!("{} params variables: ", param_names.len());
+
+    for name in param_names {
+        let value: crazyflie_lib::Value = crazyflie.param.get(&name).await.unwrap();
+        let writable = if crazyflie.param.is_writable(&name).unwrap() {
+            "RW"
+        } else {
+            "RO"
+        };
+        println!("{}\t{}\t{:?}", name, writable, value);
+    }
 
     let val: f32 = crazyflie.param.get("pid_attitude.yaw_kd").await.unwrap();
     println!("Param value: {}", val);

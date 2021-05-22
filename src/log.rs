@@ -1,6 +1,6 @@
 use crazyflie_link::Packet;
 use flume as channel;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[repr(u8)]
 #[derive(Debug)]
@@ -17,7 +17,7 @@ impl From<u8> for LogItemType {
 #[derive(Debug)]
 pub struct Log {
     uplink: channel::Sender<Packet>,
-    toc: HashMap<String, (u16, LogItemType)>,
+    toc: BTreeMap<String, (u16, LogItemType)>,
 }
 
 const LOG_PORT: u8 = 5;

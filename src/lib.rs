@@ -138,7 +138,7 @@ async fn fetch_toc<T, E>(
     port: u8,
     uplink: channel::Sender<Packet>,
     downlink: channel::Receiver<Packet>,
-) -> std::collections::HashMap<String, (u16, T)>
+) -> std::collections::BTreeMap<String, (u16, T)>
 where
     T: TryFrom<u8, Error = E>,
     E: std::fmt::Debug,
@@ -153,7 +153,7 @@ where
 
     println!("Log len: {}", toc_len);
 
-    let mut toc = std::collections::HashMap::new();
+    let mut toc = std::collections::BTreeMap::new();
 
     for i in 0..toc_len {
         let pk = Packet::new(

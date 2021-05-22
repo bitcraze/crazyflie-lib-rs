@@ -6,7 +6,7 @@ use crazyflie_link::Packet;
 use flume as channel;
 use futures::lock::Mutex;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     convert::{TryFrom, TryInto},
     sync::Arc,
 };
@@ -51,7 +51,7 @@ pub struct Param {
     uplink: channel::Sender<Packet>,
     read_downlink: channel::Receiver<Packet>,
     write_downlink: Mutex<channel::Receiver<Packet>>,
-    toc: Arc<HashMap<String, (u16, ParamItemInfo)>>,
+    toc: Arc<BTreeMap<String, (u16, ParamItemInfo)>>,
     values: Arc<Mutex<HashMap<String, Value>>>,
 }
 
@@ -176,6 +176,10 @@ impl Param {
         }
     }
 
+    pub fn names(&self) -> Vec<String> {
+        self.toc.keys().cloned().collect()
+    }
+
     pub fn get_type(&self, name: &str) -> Result<ValueType, Error> {
         Ok(self
             .toc
@@ -183,6 +187,15 @@ impl Param {
             .ok_or_else(|| not_found(name))?
             .1
             .item_type)
+    }
+
+    pub fn is_writable(&self, name: &str) -> Result<bool, Error> {
+        Ok(self
+            .toc
+            .get(name)
+            .ok_or_else(|| not_found(name))?
+            .1
+            .writable)
     }
 
     pub async fn get<T: TryFrom<Value>>(&self, name: &str) -> Result<T, Error>
