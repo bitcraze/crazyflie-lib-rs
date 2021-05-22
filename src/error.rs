@@ -4,7 +4,7 @@ use std::array::TryFromSliceError;
 pub enum Error {
     ProtocolError(String),
     ParamError(String),
-    ConversionError(TryFromSliceError),
+    ConversionError(String),
 }
 
 impl std::fmt::Display for Error {
@@ -17,6 +17,6 @@ impl std::error::Error for Error {}
 
 impl From<TryFromSliceError> for Error {
     fn from(e: TryFromSliceError) -> Self {
-        Self::ConversionError(e)
+        Self::ConversionError(format!("{:?}", e))
     }
 }

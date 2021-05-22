@@ -1,10 +1,12 @@
 mod error;
 mod log;
 mod param;
+mod value;
 
 pub use crate::error::Error;
 pub use crate::log::Log;
 pub use crate::param::Param;
+pub use crate::value::{Value, ValueType};
 
 use async_trait::async_trait;
 use crazyflie_link::Packet;
