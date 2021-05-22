@@ -46,6 +46,20 @@ impl TryFrom<u8> for ParamItemInfo {
     }
 }
 
+/// # Access to the Crazyflie Param Subsystem
+///
+/// The Crazyflie exposes a param subsystem that allows to easily declare parameter
+/// variables in the Crazyflie and to discover, read and write them from the ground.
+///
+/// Variables are defined in a table of content that is downloaded uppon connection.
+/// Each param variable have a unique name composed from a group and a variable name.
+/// Functions that accesses variables, take a `name` parameter that accepts a string
+/// in the format "group.variable"
+///
+/// During connection, the full param table of content is downloaded form the
+/// Crazyflie as well as the values of all the variable. If a variable value
+/// is modified by the Crazyflie during runtime, it sends a packet with the new
+/// value which updates the local value cache.
 #[derive(Debug)]
 pub struct Param {
     uplink: channel::Sender<Packet>,
@@ -143,6 +157,63 @@ impl Param {
         });
     }
 
+    /// Get the names of all the parameters
+    ///
+    /// The names contain group and name of the parameter variable formated as
+    /// "group.name".
+    pub fn names(&self) -> Vec<String> {
+        self.toc.keys().cloned().collect()
+    }
+
+    /// Return the type of a parameter variable or an Error if the parameter does not exist.
+    pub fn get_type(&self, name: &str) -> Result<ValueType, Error> {
+        Ok(self
+            .toc
+            .get(name)
+            .ok_or_else(|| not_found(name))?
+            .1
+            .item_type)
+    }
+
+    /// Return true if he parameter variable is writable. False otherwise.
+    ///
+    /// Return an error if the parameter does not exist.
+    pub fn is_writable(&self, name: &str) -> Result<bool, Error> {
+        Ok(self
+            .toc
+            .get(name)
+            .ok_or_else(|| not_found(name))?
+            .1
+            .writable)
+    }
+
+    /// Set a parameter value.
+    ///
+    /// This function will set the variable value and wait for confirmation from the
+    /// Crazyflie. If the set is successfull `Ok(())` is returned, otherwise the
+    /// error code reported by the Crazyflie is returned in the error.
+    ///
+    /// This function accepts any pritimive type as well as the [Value](crate::Value) type. The
+    /// type of the param variable is checked at runtime and must match the type
+    /// given to the function, either the direct primitive type or the type
+    /// contained in the `Value` enum. For example, to write a u16 value, one
+    /// would write:
+    ///
+    /// ```no_run
+    /// # use crazyflie_lib::{Crazyflie, Value, Error};
+    /// # use async_executors::AsyncStd;
+    /// # use crazyflie_link::LinkContext;
+    /// # use std::sync::Arc;
+    /// # async fn example() -> Result<(), Error> {
+    /// # let context = LinkContext::new(Arc::new(AsyncStd));
+    /// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await;
+    /// cf.param.set("example.param", 42u16).await?;  // From primitive
+    /// cf.param.set("example.param", Value::U16(42)).await?;  // From Value
+    /// # Ok(())
+    /// # };
+    /// ```
+    ///
+    /// Return an error in case of type mismatch or if the variable does not exist.
     pub async fn set<T: Into<Value>>(&self, param: &str, value: T) -> Result<(), Error> {
         let value: Value = value.into();
         let (param_id, param_info) = self.toc.get(param).ok_or_else(|| not_found(param))?;
@@ -176,28 +247,30 @@ impl Param {
         }
     }
 
-    pub fn names(&self) -> Vec<String> {
-        self.toc.keys().cloned().collect()
-    }
-
-    pub fn get_type(&self, name: &str) -> Result<ValueType, Error> {
-        Ok(self
-            .toc
-            .get(name)
-            .ok_or_else(|| not_found(name))?
-            .1
-            .item_type)
-    }
-
-    pub fn is_writable(&self, name: &str) -> Result<bool, Error> {
-        Ok(self
-            .toc
-            .get(name)
-            .ok_or_else(|| not_found(name))?
-            .1
-            .writable)
-    }
-
+    /// Get param value
+    ///
+    /// Get value of a parameter. This frunction takes the value from a local
+    /// cache and so is quick.
+    ///
+    /// Similarly to the `set` function above, the type of the param must match
+    /// the return parameter. For example to get a u16 param:
+    /// ```no_run
+    /// # use crazyflie_lib::{Crazyflie, Value, Error};
+    /// # use async_executors::AsyncStd;
+    /// # use crazyflie_link::LinkContext;
+    /// # use std::sync::Arc;
+    /// # async fn example() -> Result<(), Error> {
+    /// # let context = LinkContext::new(Arc::new(AsyncStd));
+    /// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await;
+    /// let example: u16 = cf.param.get("example.param").await?;  // To primitive
+    /// dbg!(example);  // 42
+    /// let example: Value = cf.param.get("example.param").await?;  // To Value
+    /// dbg!(example);  // Value::U16(42)
+    /// # Ok(())
+    /// # };
+    /// ```
+    ///
+    /// Return an error in case of type mismatch or if the variable does not exist.
     pub async fn get<T: TryFrom<Value>>(&self, name: &str) -> Result<T, Error>
     where
         <T as TryFrom<Value>>::Error: std::fmt::Debug,
@@ -214,6 +287,22 @@ impl Param {
             .map_err(|e| Error::ParamError(format!("Type error reading param: {:?}", e)))?)
     }
 
+    /// Set a parameter from a f64 potentially loosing data
+    ///
+    /// This function is a forgiving version of the `set` function. It allows
+    /// to set any parameter of any type from a `f64` value. This allows to set
+    /// parameters without caring about the type and risking a type conversion
+    /// runtime error. Since there is no type or value check, loss of information
+    /// can happen when using this function.
+    ///
+    /// Loss of information can happen in the following cases:
+    ///  - When setting an integer, the value is truncated to the number of bit of the parameter
+    ///    - Example: Setting `257` to a `u8` variable will set it to the value `1`
+    ///  - Similarly floating point precision will be truncated to the parameter precision. Rounding is undefined.
+    ///  - Setting a floating point outside the range of the parameter is undefined.
+    ///  - It is not possible to represent accuratly a `u64` parameter in a `f64`.
+    ///
+    /// Returns an error if the param does not exists.
     pub async fn set_lossy(&self, name: &str, value: f64) -> Result<(), Error> {
         let param_type = self
             .toc
@@ -239,6 +328,18 @@ impl Param {
         self.set(name, value).await
     }
 
+    /// Get a parameter as a `f64` independently of the parameter type
+    ///
+    /// This function is a forgiving version of the `get` function. It allows
+    /// to get any parameter of any type as a `f64` value. This allows to get
+    /// parameters without caring about the type and risking a type conversion
+    /// runtime error. Since there is no type or value check, loss of information
+    /// can happen when using this function.
+    ///
+    /// Loss of information can happen in the following cases:
+    ///  - It is not possible to represent accuratly a `u64` parameter in a `f64`.
+    ///
+    /// Returns an error if the param does not exists.
     pub async fn get_lossy(&self, name: &str) -> Result<f64, Error> {
         let value: Value = self.get(name).await?;
 
