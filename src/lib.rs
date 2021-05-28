@@ -3,7 +3,7 @@ pub mod log;
 pub mod param;
 mod value;
 
-pub use crate::error::Error;
+pub use crate::error::{Error, Result};
 pub(crate) use crate::log::Log;
 pub(crate) use crate::param::Param;
 pub use crate::value::{Value, ValueType};
@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use crazyflie_link::Packet;
 use flume as channel;
 use flume::{Receiver, Sender};
+use std::collections::BTreeMap;
 use std::{
-    collections::HashMap,
     convert::{TryFrom, TryInto},
     sync::Arc,
 };
@@ -68,14 +68,14 @@ impl Crazyflie {
 struct CrtpDispatch {
     link: Arc<crazyflie_link::Connection>,
     // port_callbacks: [Arc<Mutex<Option<Sender<Packet>>>>; 15]
-    port_channels: HashMap<u8, Sender<Packet>>,
+    port_channels: BTreeMap<u8, Sender<Packet>>,
 }
 
 impl CrtpDispatch {
     fn new(link: Arc<crazyflie_link::Connection>) -> Self {
         CrtpDispatch {
             link,
-            port_channels: HashMap::new(),
+            port_channels: BTreeMap::new(),
         }
     }
 
@@ -143,15 +143,12 @@ where
     T: TryFrom<u8, Error = E>,
     E: std::fmt::Debug,
 {
-    println!("Sending log request ...");
     let pk = Packet::new(port, 0, vec![TOC_INFO]);
     uplink.send_async(pk).await.unwrap();
 
     let pk = downlink.wait_packet(port, TOC_CHANNEL, &[TOC_INFO]).await;
 
     let toc_len = u16::from_le_bytes(pk.get_data()[1..3].try_into().unwrap());
-
-    println!("Log len: {}", toc_len);
 
     let mut toc = std::collections::BTreeMap::new();
 
@@ -169,65 +166,12 @@ where
         let group = String::from_utf8_lossy(strings.next().expect("TOC packet format error"));
         let name = String::from_utf8_lossy(strings.next().expect("TOC packet format error"));
 
-        // println!("{}: {}.{}", port, &group, &name);
         let id = u16::from_le_bytes(pk.get_data()[1..3].try_into().unwrap());
         let item_type = pk.get_data()[3].try_into().unwrap();
         toc.insert(format!("{}.{}", group, name), (id, item_type));
     }
 
     toc
-}
-
-pub struct CrtpChannelDispatcher {
-    senders: Vec<channel::Sender<Packet>>,
-    receivers: Vec<channel::Receiver<Packet>>,
-    downlink: channel::Receiver<Packet>,
-}
-
-impl CrtpChannelDispatcher {
-    pub fn new(downlink: channel::Receiver<Packet>) -> Self {
-        let (mut senders, mut receivers) = (Vec::new(), Vec::new());
-
-        for _ in 0..4 {
-            let (tx, rx) = channel::unbounded();
-            senders.push(tx);
-            receivers.insert(0, rx);
-        }
-
-        Self {
-            senders,
-            receivers,
-            downlink,
-        }
-    }
-
-    pub async fn launch(
-        self,
-    ) -> (
-        Receiver<Packet>,
-        Receiver<Packet>,
-        Receiver<Packet>,
-        Receiver<Packet>,
-    ) {
-        let mut receivers = self.receivers;
-        let senders = self.senders;
-        let downlink = self.downlink;
-
-        async_std::task::spawn(async move {
-            while let Ok(pk) = downlink.recv_async().await {
-                if pk.get_channel() < 4 {
-                    let _ = senders[pk.get_channel() as usize].send_async(pk).await;
-                }
-            }
-        });
-
-        (
-            receivers.pop().unwrap(),
-            receivers.pop().unwrap(),
-            receivers.pop().unwrap(),
-            receivers.pop().unwrap(),
-        )
-    }
 }
 
 pub fn crtp_channel_dispatcher(
