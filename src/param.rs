@@ -41,7 +41,7 @@ impl TryFrom<u8> for ParamItemInfo {
                     )))
                 }
             },
-            writable: (value & 0x10) == 0,
+            writable: (value & (1<<6)) == 0,
         })
     }
 }
