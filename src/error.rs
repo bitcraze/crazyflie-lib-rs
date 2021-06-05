@@ -1,9 +1,12 @@
 use std::array::TryFromSliceError;
 
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug)]
 pub enum Error {
     ProtocolError(String),
     ParamError(String),
+    LogError(String),
     ConversionError(String),
 }
 

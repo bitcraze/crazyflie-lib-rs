@@ -3,6 +3,14 @@ pub mod log;
 pub mod param;
 mod value;
 
+// Async executor selection
+#[cfg(feature = "async-std")]
+pub(crate) use async_std::task::spawn as spawn;
+
+#[cfg(feature = "wasm-bindgen-furutes")]
+use wasm_bindgen_futures::spawn_local as spawn;
+
+
 pub use crate::error::{Error, Result};
 pub(crate) use crate::log::Log;
 pub(crate) use crate::param::Param;
@@ -39,7 +47,7 @@ impl Crazyflie {
 
         // Uplink queue
         let (uplink, rx) = channel::unbounded();
-        async_std::task::spawn(async move {
+        spawn(async move {
             while let Ok(pk) = rx.recv_async().await {
                 if link.send_packet(pk).await.is_err() {
                     break;
@@ -92,7 +100,7 @@ impl CrtpDispatch {
 
     async fn run(self) {
         let link = self.link.clone();
-        async_std::task::spawn(async move {
+        spawn(async move {
             loop {
                 let packet = link.recv_packet().await.unwrap();
                 if packet.get_port() < 16 {
@@ -190,7 +198,7 @@ pub fn crtp_channel_dispatcher(
         receivers.insert(0, rx);
     }
 
-    async_std::task::spawn(async move {
+    spawn(async move {
         while let Ok(pk) = downlink.recv_async().await {
             if pk.get_channel() < 4 {
                 let _ = senders[pk.get_channel() as usize].send_async(pk).await;
