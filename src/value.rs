@@ -31,6 +31,24 @@ pub enum ValueType {
     F64,
 }
 
+impl ValueType {
+    pub fn byte_length(&self) -> usize {
+        match self {
+            ValueType::U8 => 1,
+            ValueType::U16 => 2,
+            ValueType::U32 => 4,
+            ValueType::U64 => 8,
+            ValueType::I8 => 1,
+            ValueType::I16 => 2,
+            ValueType::I32 => 4,
+            ValueType::I64 => 8,
+            ValueType::F16 => 2,
+            ValueType::F32 => 4,
+            ValueType::F64 => 8,
+        }
+    }
+}
+
 impl From<Value> for ValueType {
     fn from(value: Value) -> Self {
         match value {
