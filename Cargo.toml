@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crazyflie-link = { version = "*", path = "../crazyflie-link-rs/crazyflie-link" }
+crazyflie-link = { version = "*", path = "../crazyflie-link-rs/crazyflie-link", default-features = false }
 async_executors = "0.4.1"
 futures-util = "0.3.14"
 futures = "0.3.14"
@@ -21,4 +21,5 @@ async-std = { version = "1.9.0", features = ["attributes"], optional = true }
 wasm-bindgen-futures = { version = "0.4.24", optional = true }
 
 [features]
-default = ["async-std"]
+default = ["async-std", "crazyflie-link/native"]
+web = ["wasm-bindgen-futures", "crazyflie-link/webusb"]

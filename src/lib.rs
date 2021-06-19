@@ -7,7 +7,7 @@ mod value;
 #[cfg(feature = "async-std")]
 pub(crate) use async_std::task::spawn as spawn;
 
-#[cfg(feature = "wasm-bindgen-furutes")]
+#[cfg(feature = "wasm-bindgen-futures")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
 
