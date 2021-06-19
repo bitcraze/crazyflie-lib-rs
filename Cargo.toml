@@ -7,10 +7,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crazyflie-link = { version = "*", path = "../crazyflie-link-rs/crazyflie-link", default-features = false }
+crazyflie-link = { git="https://github.com/ataffanel/crazyflie-link-rs", rev="3a50486", default-features = false }
 async_executors = "0.4.1"
-futures-util = "0.3.14"
-futures = "0.3.14"
+futures-util = "0.3"
+futures = "0.3"
 async-stream = "0.3.1"
 flume = "0.10.5"
 async-trait = "0.1.50"
