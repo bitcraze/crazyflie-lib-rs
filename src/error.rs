@@ -8,6 +8,8 @@ pub enum Error {
     ParamError(String),
     LogError(String),
     ConversionError(String),
+    Disconnected,
+    VariableNotFound,
 }
 
 impl std::fmt::Display for Error {
