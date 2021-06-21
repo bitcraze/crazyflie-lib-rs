@@ -33,6 +33,40 @@ const RESET: u8 = 5;
 const CREATE_BLOCK_V2: u8 = 6;
 const APPEND_BLOCK_V2: u8 = 7;
 
+/// Crazyflie Log subsystem
+///
+/// The Crazyflie log subsystem allows to asynchronously log the value of exposed Crazyflie variables from the ground.
+///
+/// At connection time, a Table Of Content (TOC) of the log variable is fetched from the Crazyflie which allows to
+/// log variables using their names. To log variable a [LogBlock] needs to be created. The variable to be logged are
+/// added to the LogBlock and then the LogBlock can be started returning a LogStream that will yield the log datas.
+///
+/// ```no_run
+/// # use crazyflie_lib::{Crazyflie, Value, Error};
+/// # use async_executors::AsyncStd;
+/// # use crazyflie_link::LinkContext;
+/// # use std::sync::Arc;
+/// # async fn example() -> Result<(), Error> {
+/// # let context = LinkContext::new(Arc::new(AsyncStd));
+/// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await;
+/// // Create the log block
+/// let block = cf.log.create_block();
+///
+/// // Append Variables
+/// block.add_variable("stateEstimate.roll").await?;
+/// block.add_variable("stateEstimate.pitch").await?;
+/// block.add_variable("stateEstimate.yaw").await?;
+///
+/// // Start the block
+/// let stream = block.start().await;
+///
+/// // Get Data!
+/// while let Ok(data) = stream.next().await {
+///     println("Yaw is {:?}", data.data["stateEstimate.yaw"]);
+/// }
+/// # Ok(())
+/// # };
+/// ```
 impl Log {
     pub(crate) async fn new(
         downlink: channel::Receiver<Packet>,
@@ -234,7 +268,7 @@ impl LogBlock {
     /// consumes the logblock object and return a `LogStream`. The function
     /// [stop()](struct.LogStream.html#method.stop) can be called on the LogStream to get back the logblock object.
     ///
-    /// This function is faillibal. It can fail if there is a protocol error or an error
+    /// This function is failable. It can fail if there is a protocol error or an error
     /// reported by the Crazyflie. In such case, the LogBlock object will be dropped and the block will be deleted in
     /// the Crazyflie
     pub async fn start(self, period: LogPeriod) -> Result<LogStream> {
