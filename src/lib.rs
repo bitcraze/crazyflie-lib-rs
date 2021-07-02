@@ -1,6 +1,7 @@
 mod error;
 pub mod log;
 pub mod param;
+pub mod commander;
 mod value;
 
 // Async executor selection
@@ -14,6 +15,7 @@ use wasm_bindgen_futures::spawn_local as spawn;
 pub use crate::error::{Error, Result};
 pub(crate) use crate::log::Log;
 pub(crate) use crate::param::Param;
+pub(crate) use crate::commander::Commander;
 pub use crate::value::{Value, ValueType};
 
 use async_trait::async_trait;
@@ -31,6 +33,7 @@ pub struct Crazyflie {
     uplink: channel::Sender<Packet>,
     pub log: Log,
     pub param: Param,
+    pub commander: Commander,
 }
 
 impl Crazyflie {
@@ -63,13 +66,15 @@ impl Crazyflie {
         let param_downlink = dispatcher.get_port_receiver(2).unwrap();
         let param = Param::new(param_downlink, uplink.clone());
 
+        let commander = Commander::new(uplink.clone());
+
         // Start the downlink packet dispatcher
         dispatcher.run().await;
 
         // Intitialize all modules in parallel
         let (log, param) = futures::join!(log, param);
 
-        Crazyflie { uplink, log, param }
+        Crazyflie { uplink, log, param, commander }
     }
 }
 
