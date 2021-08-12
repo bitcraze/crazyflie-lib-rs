@@ -1,16 +1,15 @@
-
-use flume::Sender;
 use crazyflie_link::Packet;
+use flume::Sender;
 
-use crate::{Result, Error};
+use crate::{Error, Result};
 
-const RPYT_PORT:u8 = 3;
-const GENERIC_PORT:u8 = 7;
+const RPYT_PORT: u8 = 3;
+const _GENERIC_PORT: u8 = 7;
 
-const RPYT_CHANNEL:u8 = 0;
+const RPYT_CHANNEL: u8 = 0;
 
-const GENERIC_SETPOINT_CHANNEL:u8 = 0;
-const GENERIC_CMD_CHANNEL:u8 = 1;
+const _GENERIC_SETPOINT_CHANNEL: u8 = 0;
+const _GENERIC_CMD_CHANNEL: u8 = 1;
 
 #[derive(Debug)]
 pub struct Commander {
@@ -43,7 +42,7 @@ impl Commander {
     /// cf.commander.setpoint_rpyt(0, 0, 0, 1000);   // Thrust set to 1000
     /// # }
     /// ```
-    pub async fn setpoint_rpyt(&self, roll: f32, pitch: f32, yaw: f32, thrust: u16) -> Result<()>{
+    pub async fn setpoint_rpyt(&self, roll: f32, pitch: f32, yaw: f32, thrust: u16) -> Result<()> {
         let mut payload = Vec::new();
         payload.append(&mut roll.to_le_bytes().to_vec());
         payload.append(&mut pitch.to_le_bytes().to_vec());
@@ -52,7 +51,10 @@ impl Commander {
 
         let pk = Packet::new(RPYT_PORT, RPYT_CHANNEL, payload);
 
-        self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
+        self.uplink
+            .send_async(pk)
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
         Ok(())
     }
@@ -63,5 +65,4 @@ impl Commander {
 /// These setpoints are implemented in such a way that they are easy to add in the Crazyflie firmware
 /// and in libs like this one. So if you have a use-case not covered by any of the existing setpoint
 /// do not hesitate to implement and contribute your dream setpoint :-).
-impl Commander {
-}
+impl Commander {}

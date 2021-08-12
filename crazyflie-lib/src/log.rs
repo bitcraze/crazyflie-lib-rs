@@ -1,3 +1,5 @@
+use crate::WaitForPacket;
+use crate::{Error, Result, Value, ValueType};
 use crazyflie_link::Packet;
 use flume as channel;
 use futures::lock::Mutex;
@@ -5,8 +7,6 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Weak;
 use std::{collections::BTreeMap, convert::TryFrom, sync::Arc, time::Duration};
-use crate::{Error, Result, Value, ValueType};
-use crate::WaitForPacket;
 
 #[derive(Debug)]
 pub struct Log {
@@ -71,10 +71,11 @@ impl Log {
     pub(crate) async fn new(
         downlink: channel::Receiver<Packet>,
         uplink: channel::Sender<Packet>,
-    ) -> Self {
-        let (toc_downlink, control_downlink, data_downlink, _) = crate::crtp_channel_dispatcher(downlink);
+    ) -> Result<Self> {
+        let (toc_downlink, control_downlink, data_downlink, _) =
+            crate::crtp_channel_dispatcher(downlink);
 
-        let toc = crate::fetch_toc(LOG_PORT, uplink.clone(), toc_downlink).await;
+        let toc = crate::fetch_toc(LOG_PORT, uplink.clone(), toc_downlink).await?;
         let toc = Arc::new(toc);
 
         let control_downlink = Arc::new(Mutex::new(control_downlink));
@@ -85,21 +86,35 @@ impl Log {
 
         let active_blocks = Mutex::new(BTreeMap::new());
 
-        let log = Self { uplink, control_downlink, toc, next_block_id, data_channels, active_blocks};
-        log.reset().await;
+        let log = Self {
+            uplink,
+            control_downlink,
+            toc,
+            next_block_id,
+            data_channels,
+            active_blocks,
+        };
+        log.reset().await?;
         log.spawn_data_dispatcher(data_downlink).await;
 
-        log
+        Ok(log)
     }
 
-    async fn reset(&self) {
+    async fn reset(&self) -> Result<()> {
         let downlink = self.control_downlink.lock().await;
 
         let pk = Packet::new(LOG_PORT, CONTROL_CHANNEL, vec![RESET]);
-        self.uplink.send_async(pk).await.unwrap();
+        self.uplink
+            .send_async(pk)
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
-        let pk = downlink.wait_packet(LOG_PORT, CONTROL_CHANNEL, &[RESET]).await;
+        let pk = downlink
+            .wait_packet(LOG_PORT, CONTROL_CHANNEL, &[RESET])
+            .await?;
         assert_eq!(pk.get_data()[2], 0);
+
+        Ok(())
     }
 
     async fn spawn_data_dispatcher(&self, data_downlink: flume::Receiver<Packet>) {
@@ -109,8 +124,15 @@ impl Log {
                 if packet.get_data().len() > 1 {
                     let block_id = packet.get_data()[0];
                     let data_channels = data_channels.lock().await;
-                    if data_channels.contains_key(&block_id) {
-                        data_channels.get(&block_id).unwrap().send_async(packet).await.unwrap();
+                    if data_channels.contains_key(&block_id)
+                        && data_channels
+                            .get(&block_id)
+                            .unwrap()
+                            .send_async(packet)
+                            .await
+                            .is_err()
+                    {
+                        break;
                     }
                 }
             }
@@ -155,13 +177,21 @@ impl Log {
                 let control_downlink = self.control_downlink.lock().await;
 
                 let pk = Packet::new(LOG_PORT, CONTROL_CHANNEL, vec![DELETE_BLOCK, block_id]);
-                self.uplink.send_async(pk).await.unwrap();
-                
-                let pk = control_downlink.wait_packet(LOG_PORT, CONTROL_CHANNEL, &[DELETE_BLOCK, block_id]).await;
+                self.uplink
+                    .send_async(pk)
+                    .await
+                    .map_err(|_| Error::Disconnected)?;
+
+                let pk = control_downlink
+                    .wait_packet(LOG_PORT, CONTROL_CHANNEL, &[DELETE_BLOCK, block_id])
+                    .await?;
                 let error = pk.get_data()[2];
 
                 if error != 0 {
-                    return Err(Error::LogError(format!("Protocol error when deleting block: {}", error)));
+                    return Err(Error::LogError(format!(
+                        "Protocol error when deleting block: {}",
+                        error
+                    )));
                 }
 
                 active_blocks.remove_entry(&block_id);
@@ -174,26 +204,36 @@ impl Log {
     pub async fn create_block(&self) -> Result<LogBlock> {
         self.cleanup_blocks().await?;
 
-        let block_id =self.generate_next_block_id().await?;
+        let block_id = self.generate_next_block_id().await?;
         let control_downlink = self.control_downlink.lock().await;
 
         let pk = Packet::new(LOG_PORT, CONTROL_CHANNEL, vec![CREATE_BLOCK_V2, block_id]);
-        self.uplink.send_async(pk).await.unwrap();
-        
-        let pk = control_downlink.wait_packet(LOG_PORT, CONTROL_CHANNEL, &[CREATE_BLOCK_V2, block_id]).await;
+        self.uplink
+            .send_async(pk)
+            .await
+            .map_err(|_| Error::Disconnected)?;
+
+        let pk = control_downlink
+            .wait_packet(LOG_PORT, CONTROL_CHANNEL, &[CREATE_BLOCK_V2, block_id])
+            .await?;
         let error = pk.get_data()[2];
 
         if error != 0 {
-            return Err(Error::LogError(format!("Protocol error when creating block: {}", error)));
+            return Err(Error::LogError(format!(
+                "Protocol error when creating block: {}",
+                error
+            )));
         }
 
-        // Todo: Create data channel for the block 
+        // Todo: Create data channel for the block
         let (tx, rx) = flume::unbounded();
         self.data_channels.lock().await.insert(block_id, tx);
 
         let canary = Arc::new(());
-        self.active_blocks.lock().await.insert(block_id, Arc::downgrade(&canary));
-
+        self.active_blocks
+            .lock()
+            .await
+            .insert(block_id, Arc::downgrade(&canary));
 
         Ok(LogBlock {
             _canary: canary,
@@ -225,7 +265,12 @@ impl TryFrom<u8> for LogItemInfo {
             6 => ValueType::I32,
             7 => ValueType::F32,
             8 => ValueType::F16,
-            _ => return Err(Error::ProtocolError(format!("Invalid log item type: {}", log_type))),
+            _ => {
+                return Err(Error::ProtocolError(format!(
+                    "Invalid log item type: {}",
+                    log_type
+                )))
+            }
         };
 
         Ok(LogItemInfo { item_type })
@@ -245,7 +290,12 @@ impl TryInto<u8> for LogItemInfo {
             ValueType::I32 => 6,
             ValueType::F32 => 7,
             ValueType::F16 => 8,
-            _ => return Err(Error::LogError(format!("Value type {:?} not handled by log", self.item_type))),
+            _ => {
+                return Err(Error::LogError(format!(
+                    "Value type {:?} not handled by log",
+                    self.item_type
+                )))
+            }
         };
         Ok(value)
     }
@@ -275,23 +325,33 @@ impl LogBlock {
         let control_uplink = self.control_downlink.upgrade().ok_or(Error::Disconnected)?;
         let control_uplink = control_uplink.lock().await;
 
-        let pk = Packet::new(LOG_PORT, CONTROL_CHANNEL, vec![START_BLOCK, self.block_id, period.0]);
-        self.uplink.send_async(pk).await.unwrap();
+        let pk = Packet::new(
+            LOG_PORT,
+            CONTROL_CHANNEL,
+            vec![START_BLOCK, self.block_id, period.0],
+        );
+        self.uplink
+            .send_async(pk)
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
-        let answer = control_uplink.wait_packet(LOG_PORT, CONTROL_CHANNEL, &[START_BLOCK, self.block_id]).await;
+        let answer = control_uplink
+            .wait_packet(LOG_PORT, CONTROL_CHANNEL, &[START_BLOCK, self.block_id])
+            .await?;
         if answer.get_data().len() != 3 {
-            return Err(Error::ProtocolError("Malformed Log control packet".to_owned()));
+            return Err(Error::ProtocolError(
+                "Malformed Log control packet".to_owned(),
+            ));
         }
         let error_code = answer.get_data()[2];
         if error_code != 0 {
-            return Err(Error::LogError(format!("Error starting lock: {}", error_code)));
+            return Err(Error::LogError(format!(
+                "Error starting lock: {}",
+                error_code
+            )));
         }
 
-        Ok(
-            LogStream {
-                log_block: self
-            }
-        )
+        Ok(LogStream { log_block: self })
     }
 
     /// Add variable to the log block
@@ -302,25 +362,35 @@ impl LogBlock {
     /// This function can fail if the variable is not found in the toc or of the Crazyflie returns an error
     /// The most common error reported by the Crazyflie would be if the log block is already too full.
     pub async fn add_variable(&mut self, name: &str) -> Result<()> {
-        let toc  = self.toc.upgrade().ok_or(Error::Disconnected)?;
+        let toc = self.toc.upgrade().ok_or(Error::Disconnected)?;
         let (variable_id, info) = toc.get(name).ok_or(Error::VariableNotFound)?;
 
         // Add variable to Crazyflie
         let control_uplink = self.control_downlink.upgrade().ok_or(Error::Disconnected)?;
         let control_uplink = control_uplink.lock().await;
 
-        let mut payload = vec![APPEND_BLOCK_V2, self.block_id, info.clone().try_into()?];
+        let mut payload = vec![APPEND_BLOCK_V2, self.block_id, (*info).try_into()?];
         payload.extend_from_slice(&variable_id.to_le_bytes());
         let pk = Packet::new(LOG_PORT, CONTROL_CHANNEL, payload);
-        self.uplink.send_async(pk).await.unwrap();
+        self.uplink
+            .send_async(pk)
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
-        let answer = control_uplink.wait_packet(LOG_PORT, CONTROL_CHANNEL, &[APPEND_BLOCK_V2, self.block_id]).await;
+        let answer = control_uplink
+            .wait_packet(LOG_PORT, CONTROL_CHANNEL, &[APPEND_BLOCK_V2, self.block_id])
+            .await?;
         if answer.get_data().len() != 3 {
-            return Err(Error::ProtocolError("Mallformed Log control packet".to_owned()));
+            return Err(Error::ProtocolError(
+                "Mallformed Log control packet".to_owned(),
+            ));
         }
         let error_code = answer.get_data()[2];
         if error_code != 0 {
-            return Err(Error::LogError(format!("Error appending variable to block: {}", error_code)));
+            return Err(Error::LogError(format!(
+                "Error appending variable to block: {}",
+                error_code
+            )));
         }
 
         // Add variable to local list
@@ -343,19 +413,42 @@ impl LogStream {
     /// This function can only fail on unexpected protocol error. If it does, the log block is dropped and will be
     /// cleaned-up next time a log block is created.
     pub async fn stop(self) -> Result<LogBlock> {
-        let control_uplink = self.log_block.control_downlink.upgrade().ok_or(Error::Disconnected)?;
+        let control_uplink = self
+            .log_block
+            .control_downlink
+            .upgrade()
+            .ok_or(Error::Disconnected)?;
         let control_uplink = control_uplink.lock().await;
 
-        let pk = Packet::new(LOG_PORT, CONTROL_CHANNEL, vec![STOP_BLOCK, self.log_block.block_id]);
-        self.log_block.uplink.send_async(pk).await.unwrap();
+        let pk = Packet::new(
+            LOG_PORT,
+            CONTROL_CHANNEL,
+            vec![STOP_BLOCK, self.log_block.block_id],
+        );
+        self.log_block
+            .uplink
+            .send_async(pk)
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
-        let answer = control_uplink.wait_packet(LOG_PORT, CONTROL_CHANNEL, &[STOP_BLOCK, self.log_block.block_id]).await;
+        let answer = control_uplink
+            .wait_packet(
+                LOG_PORT,
+                CONTROL_CHANNEL,
+                &[STOP_BLOCK, self.log_block.block_id],
+            )
+            .await?;
         if answer.get_data().len() != 3 {
-            return Err(Error::ProtocolError("Malformed Log control packet".to_owned()));
+            return Err(Error::ProtocolError(
+                "Malformed Log control packet".to_owned(),
+            ));
         }
         let error_code = answer.get_data()[2];
         if error_code != 0 {
-            return Err(Error::LogError(format!("Error starting lock: {}", error_code)));
+            return Err(Error::LogError(format!(
+                "Error starting lock: {}",
+                error_code
+            )));
         }
 
         Ok(self.log_block)
@@ -365,7 +458,12 @@ impl LogStream {
     ///
     /// This function will return an error if the Crazyflie gets disconnected.
     pub async fn next(&self) -> Result<LogData> {
-        let packet = self.log_block.data_channel.recv_async().await.map_err(|_| Error::LogError("Disconnected".to_owned()))?;
+        let packet = self
+            .log_block
+            .data_channel
+            .recv_async()
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
         self.decode_packet(&packet.get_data()[1..])
     }
@@ -373,16 +471,20 @@ impl LogStream {
     fn decode_packet(&self, data: &[u8]) -> Result<LogData> {
         let mut timestamp = data[0..=2].to_vec();
         timestamp.insert(0, 0);
+        // The timestamp is 2 bytes long by design so this unwrap cannot fail
         let timestamp = u32::from_le_bytes(timestamp.try_into().unwrap());
 
         let mut index = 3;
         let mut log_data = HashMap::new();
         for (name, value_type) in &self.log_block.variables {
             let byte_length = value_type.byte_length();
-            log_data.insert(name.clone(), Value::from_le_bytes(&data[index..(index+byte_length)], *value_type).unwrap());
+            log_data.insert(
+                name.clone(),
+                Value::from_le_bytes(&data[index..(index + byte_length)], *value_type)?,
+            );
             index += byte_length;
         }
-        
+
         Ok(LogData {
             timestamp,
             data: log_data,
@@ -411,7 +513,9 @@ impl TryFrom<Duration> for LogPeriod {
         let period_ms = value.as_millis();
         let period_arg = period_ms / 10;
         if period_arg == 0 || period_arg > 255 {
-            return Err(Error::LogError("Invalid log period, should be between 10ms and 2550ms".to_owned()));
+            return Err(Error::LogError(
+                "Invalid log period, should be between 10ms and 2550ms".to_owned(),
+            ));
         }
         Ok(LogPeriod(period_arg as u8))
     }

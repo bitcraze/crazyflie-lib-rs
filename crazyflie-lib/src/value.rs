@@ -123,6 +123,22 @@ impl Value {
             ValueType::F64 => Ok(Value::F64(f64::from_le_bytes(bytes.try_into()?))),
         }
     }
+
+    pub fn to_f64_lossy(&self) -> f64 {
+        match *self {
+            Value::U8(v) => v as f64,
+            Value::U16(v) => v as f64,
+            Value::U32(v) => v as f64,
+            Value::U64(v) => v as f64,
+            Value::I8(v) => v as f64,
+            Value::I16(v) => v as f64,
+            Value::I32(v) => v as f64,
+            Value::I64(v) => v as f64,
+            Value::F16(v) => v.to_f64(),
+            Value::F32(v) => v as f64,
+            Value::F64(v) => v as f64,
+        }
+    }
 }
 
 impl From<Value> for Vec<u8> {

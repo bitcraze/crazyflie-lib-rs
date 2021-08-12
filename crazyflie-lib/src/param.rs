@@ -1,6 +1,6 @@
 use half::prelude::*;
 
-use crate::{Error, WaitForPacket};
+use crate::{Error, Result, WaitForPacket};
 use crate::{Value, ValueType};
 use crazyflie_link::Packet;
 use flume as channel;
@@ -20,7 +20,7 @@ struct ParamItemInfo {
 impl TryFrom<u8> for ParamItemInfo {
     type Error = Error;
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
+    fn try_from(value: u8) -> Result<Self> {
         Ok(Self {
             item_type: match value & 0x0f {
                 0x08 => ValueType::U8,
@@ -41,7 +41,7 @@ impl TryFrom<u8> for ParamItemInfo {
                     )))
                 }
             },
-            writable: (value & (1<<6)) == 0,
+            writable: (value & (1 << 6)) == 0,
         })
     }
 }
@@ -82,11 +82,11 @@ impl Param {
     pub(crate) async fn new(
         downlink: channel::Receiver<Packet>,
         uplink: channel::Sender<Packet>,
-    ) -> Self {
+    ) -> Result<Self> {
         let (toc_downlink, read_downlink, write_downlink, misc_downlink) =
             crate::crtp_channel_dispatcher(downlink);
 
-        let toc = crate::fetch_toc(PARAM_PORT, uplink.clone(), toc_downlink).await;
+        let toc = crate::fetch_toc(PARAM_PORT, uplink.clone(), toc_downlink).await?;
 
         let mut param = Self {
             uplink,
@@ -96,14 +96,14 @@ impl Param {
             values: Arc::new(Mutex::new(HashMap::new())),
         };
 
-        param.update_values().await.unwrap();
+        param.update_values().await?;
 
         param.spawn_misc_loop(misc_downlink).await;
 
-        param
+        Ok(param)
     }
 
-    async fn update_values(&mut self) -> Result<(), Error> {
+    async fn update_values(&mut self) -> Result<()> {
         for (name, (param_id, info)) in self.toc.as_ref() {
             let mut values = self.values.lock().await;
             values.insert(
@@ -115,9 +115,12 @@ impl Param {
         Ok(())
     }
 
-    async fn read_value(&self, param_id: u16, param_type: ValueType) -> Result<Value, Error> {
+    async fn read_value(&self, param_id: u16, param_type: ValueType) -> Result<Value> {
         let request = Packet::new(PARAM_PORT, READ_CHANNEL, param_id.to_le_bytes().into());
-        self.uplink.send_async(request.clone()).await.unwrap();
+        self.uplink
+            .send_async(request.clone())
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
         let response = self
             .read_downlink
@@ -126,7 +129,7 @@ impl Param {
                 request.get_channel(),
                 request.get_data(),
             )
-            .await;
+            .await?;
 
         Value::from_le_bytes(&response.get_data()[3..], param_type)
     }
@@ -141,11 +144,13 @@ impl Param {
                     continue;
                 }
 
+                // The range sets the buffer to 2 bytes long so this unwrap cannot fail
                 let param_id = u16::from_le_bytes(pk.get_data()[1..3].try_into().unwrap());
                 if let Some((param, (_, item_info))) = toc.iter().find(|v| v.1 .0 == param_id) {
                     if let Ok(value) =
                         Value::from_le_bytes(&pk.get_data()[3..], item_info.item_type)
                     {
+                        // The param is tested as being in the toc so this unwrap cannot fail.
                         *values.lock().await.get_mut(param).unwrap() = value;
                     } else {
                         println!("Warning: Mallformed param update");
@@ -166,7 +171,7 @@ impl Param {
     }
 
     /// Return the type of a parameter variable or an Error if the parameter does not exist.
-    pub fn get_type(&self, name: &str) -> Result<ValueType, Error> {
+    pub fn get_type(&self, name: &str) -> Result<ValueType> {
         Ok(self
             .toc
             .get(name)
@@ -178,7 +183,7 @@ impl Param {
     /// Return true if he parameter variable is writable. False otherwise.
     ///
     /// Return an error if the parameter does not exist.
-    pub fn is_writable(&self, name: &str) -> Result<bool, Error> {
+    pub fn is_writable(&self, name: &str) -> Result<bool> {
         Ok(self
             .toc
             .get(name)
@@ -214,7 +219,7 @@ impl Param {
     /// ```
     ///
     /// Return an error in case of type mismatch or if the variable does not exist.
-    pub async fn set<T: Into<Value>>(&self, param: &str, value: T) -> Result<(), Error> {
+    pub async fn set<T: Into<Value>>(&self, param: &str, value: T) -> Result<()> {
         let value: Value = value.into();
         let (param_id, param_info) = self.toc.get(param).ok_or_else(|| not_found(param))?;
 
@@ -230,13 +235,17 @@ impl Param {
         let mut request_data = Vec::from(param_id.to_le_bytes());
         request_data.append(&mut value.into());
         let request = Packet::new(PARAM_PORT, _WRITE_CHANNEL, request_data);
-        self.uplink.send_async(request).await.unwrap();
+        self.uplink
+            .send_async(request)
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
         let answer = downlink
             .wait_packet(PARAM_PORT, _WRITE_CHANNEL, &param_id.to_le_bytes())
-            .await;
+            .await?;
 
         if answer.get_data()[2] == 0 {
+            // The param is tested as being in the TOC so this unwrap cannot fail
             *self.values.lock().await.get_mut(param).unwrap() = value;
             Ok(())
         } else {
@@ -271,7 +280,7 @@ impl Param {
     /// ```
     ///
     /// Return an error in case of type mismatch or if the variable does not exist.
-    pub async fn get<T: TryFrom<Value>>(&self, name: &str) -> Result<T, Error>
+    pub async fn get<T: TryFrom<Value>>(&self, name: &str) -> Result<T>
     where
         <T as TryFrom<Value>>::Error: std::fmt::Debug,
     {
@@ -303,7 +312,7 @@ impl Param {
     ///  - It is not possible to represent accuratly a `u64` parameter in a `f64`.
     ///
     /// Returns an error if the param does not exists.
-    pub async fn set_lossy(&self, name: &str, value: f64) -> Result<(), Error> {
+    pub async fn set_lossy(&self, name: &str, value: f64) -> Result<()> {
         let param_type = self
             .toc
             .get(name)
@@ -340,7 +349,7 @@ impl Param {
     ///  - It is not possible to represent accuratly a `u64` parameter in a `f64`.
     ///
     /// Returns an error if the param does not exists.
-    pub async fn get_lossy(&self, name: &str) -> Result<f64, Error> {
+    pub async fn get_lossy(&self, name: &str) -> Result<f64> {
         let value: Value = self.get(name).await?;
 
         Ok(match value {
