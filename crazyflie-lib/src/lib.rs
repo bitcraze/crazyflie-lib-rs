@@ -22,8 +22,10 @@ use async_trait::async_trait;
 use crazyflie_link::Packet;
 use flume as channel;
 use flume::{Receiver, Sender};
+use futures::lock::Mutex;
 use std::collections::BTreeMap;
-use std::sync::Weak;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 use std::{
     convert::{TryFrom, TryInto},
@@ -40,9 +42,9 @@ pub struct Crazyflie {
     pub param: Param,
     pub commander: Commander,
     pub executor: Arc<dyn Executor>,
-    uplink_task: JoinHandle<()>,
-    dispatch_task: JoinHandle<()>,
-    canary: Arc<()>,
+    uplink_task: Mutex<Option<JoinHandle<()>>>,
+    dispatch_task: Mutex<Option<JoinHandle<()>>>,
+    disconnect: Arc<AtomicBool>,
     link: Arc<crazyflie_link::Connection>,
 }
 
@@ -61,22 +63,21 @@ impl Crazyflie {
         executor: impl Executor,
         link: crazyflie_link::Connection,
     ) -> Result<Self> {
-        let canary = Arc::new(());
+        let disconnect = Arc::new(AtomicBool::new(false));
         let executor = Arc::new(executor);
 
         // Downlink dispatcher
         let link = Arc::new(link);
-        let mut dispatcher =
-            CrtpDispatch::new(executor.clone(), link.clone(), Arc::downgrade(&canary));
+        let mut dispatcher = CrtpDispatch::new(executor.clone(), link.clone(), disconnect.clone());
 
         // Uplink queue
-        let weak_canary = Arc::downgrade(&canary);
+        let disconnect_uplink = disconnect.clone();
         let (uplink, rx) = channel::unbounded();
         let executor_uplink = executor.clone();
         let link_uplink = link.clone();
         let uplink_task = executor
             .spawn_handle_local(async move {
-                while weak_canary.upgrade().is_some() {
+                while !disconnect_uplink.load(Relaxed) {
                     match executor_uplink
                         .timeout(Duration::from_millis(100), rx.recv_async())
                         .await
@@ -115,22 +116,36 @@ impl Crazyflie {
             param: param?,
             commander,
             executor,
-            uplink_task,
-            dispatch_task,
-            canary,
+            uplink_task: Mutex::new(Some(uplink_task)),
+            dispatch_task: Mutex::new(Some(dispatch_task)),
+            disconnect,
             link,
         })
     }
 
-    pub async fn disconnect(self) {
-        // Drop canary, will make both uplink and dispatcher task quit
-        drop(self.canary);
-        // Wait for both task to finish, both will drop a reference to the link
-        self.uplink_task.await;
-        self.dispatch_task.await;
-        // There should only be one hard link to the link object by now so it is safe to unwrap
-        let link = Arc::try_unwrap(self.link).ok().unwrap();
-        link.close().await;
+    pub async fn disconnect(&self) {
+        // Set disconnect to true, will make both uplink and dispatcher task quit
+        self.disconnect.store(true, Relaxed);
+
+        // Wait for both task to finish
+        if self.uplink_task.lock().await.is_some() {
+            self.uplink_task.lock().await.take().unwrap().await
+        }
+        if self.dispatch_task.lock().await.is_some() {
+            self.dispatch_task.lock().await.take().unwrap().await
+        }
+
+        self.link.close().await;
+    }
+
+    pub async fn wait_disconnect(&self) -> String {
+        self.link.wait_close().await
+    }
+}
+
+impl Drop for Crazyflie {
+    fn drop(&mut self) {
+        self.disconnect.store(true, Relaxed);
     }
 }
 
@@ -138,7 +153,7 @@ struct CrtpDispatch {
     link: Arc<crazyflie_link::Connection>,
     // port_callbacks: [Arc<Mutex<Option<Sender<Packet>>>>; 15]
     port_channels: BTreeMap<u8, Sender<Packet>>,
-    canary: Weak<()>,
+    disconnect: Arc<AtomicBool>,
     executor: Arc<dyn Executor>,
 }
 
@@ -146,12 +161,12 @@ impl CrtpDispatch {
     fn new(
         executor: impl Executor,
         link: Arc<crazyflie_link::Connection>,
-        canary: Weak<()>,
+        disconnect: Arc<AtomicBool>,
     ) -> Self {
         CrtpDispatch {
             link,
             port_channels: BTreeMap::new(),
-            canary,
+            disconnect,
             executor: Arc::new(executor),
         }
     }
@@ -172,7 +187,7 @@ impl CrtpDispatch {
         let executor = self.executor.clone();
         executor
             .spawn_handle_local(async move {
-                while self.canary.upgrade().is_some() {
+                while !self.disconnect.load(Relaxed) {
                     match self
                         .executor
                         .timeout(Duration::from_millis(200), link.recv_packet())

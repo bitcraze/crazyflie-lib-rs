@@ -13,9 +13,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cf = Crazyflie::connect_from_uri(
         async_executors::AsyncStd,
         &context,
-        "radio://0/80/2M/E7E7E7E7E7",
+        "radio://0/60/2M/E7E7E7E7E7",
     )
     .await?;
+    let cf = Arc::new(cf);
+
+    let cf_task = cf.clone();
+    async_std::task::spawn_local(async move {
+        let reason = cf_task.wait_disconnect().await;
+        println!(
+            "Disconnect event detected by parallel task. Disconnect reason: \"{}\"",
+            reason
+        );
+    });
 
     cf.disconnect().await;
 
@@ -27,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cf = Crazyflie::connect_from_uri(
         async_executors::AsyncStd,
         &context,
-        "radio://0/80/2M/E7E7E7E7E7",
+        "radio://0/60/2M/E7E7E7E7E7",
     )
     .await;
 
@@ -41,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _cf = Crazyflie::connect_from_uri(
         async_executors::AsyncStd,
         &context,
-        "radio://0/80/2M/E7E7E7E7E7",
+        "radio://0/60/2M/E7E7E7E7E7",
     )
     .await;
 
