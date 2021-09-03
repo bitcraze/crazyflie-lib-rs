@@ -67,6 +67,7 @@ pub struct Param {
     write_downlink: Mutex<channel::Receiver<Packet>>,
     toc: Arc<BTreeMap<String, (u16, ParamItemInfo)>>,
     values: Arc<Mutex<HashMap<String, Value>>>,
+    watchers: Arc<Mutex<Vec<futures::channel::mpsc::UnboundedSender<(String, Value)>>>>,
 }
 
 fn not_found(name: &str) -> Error {
@@ -94,6 +95,7 @@ impl Param {
             write_downlink: Mutex::new(write_downlink),
             toc: Arc::new(toc),
             values: Arc::new(Mutex::new(HashMap::new())),
+            watchers: Arc::default(),
         };
 
         param.update_values().await?;
@@ -247,6 +249,7 @@ impl Param {
         if answer.get_data()[2] == 0 {
             // The param is tested as being in the TOC so this unwrap cannot fail
             *self.values.lock().await.get_mut(param).unwrap() = value;
+            self.notify_watchers(param, value).await;
             Ok(())
         } else {
             Err(Error::ParamError(format!(
@@ -365,5 +368,30 @@ impl Param {
             Value::F32(v) => v as f64,
             Value::F64(v) => v as f64,
         })
+    }
+
+    pub async fn watch_change(&self) -> impl futures::Stream<Item = (String, Value)> {
+        let (tx, rx) = futures::channel::mpsc::unbounded();
+
+        let mut watchers = self.watchers.lock().await;
+        watchers.push(tx);
+
+        rx
+    }
+
+    async fn notify_watchers(&self, name: &str, value: Value) {
+        let mut to_remove = Vec::new();
+        let mut watchers = self.watchers.lock().await;
+
+        for (i, watcher) in watchers.iter().enumerate() {
+            if watcher.unbounded_send((name.to_owned(), value)).is_err() {
+                to_remove.push(i);
+            }
+        }
+
+        // Remove watchers that have dropped
+        for i in to_remove.into_iter().rev() {
+            watchers.remove(i);
+        }
     }
 }
