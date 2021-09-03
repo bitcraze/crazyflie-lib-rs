@@ -139,7 +139,11 @@ impl Crazyflie {
     }
 
     pub async fn wait_disconnect(&self) -> String {
-        self.link.wait_close().await
+        let reason = self.link.wait_close().await;
+
+        self.disconnect().await;
+
+        reason
     }
 }
 
