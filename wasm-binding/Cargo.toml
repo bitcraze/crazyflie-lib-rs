@@ -31,7 +31,7 @@ serde = { version = "1.0", features = ["derive"] }
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.6", optional = true }
 
-crazyflie-link = { git="https://github.com/ataffanel/crazyflie-link-rs", rev="ae09033", default-features = false, features = ["webusb"] }
+crazyflie-link = { version="0.2.0", default-features = false, features = ["webusb"] }
 crazyflie-lib = { path="../crazyflie-lib", default-features = false, features = ["web"] }
 
 [dev-dependencies]
