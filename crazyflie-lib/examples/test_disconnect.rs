@@ -1,7 +1,7 @@
 use async_executors::AsyncStd;
 use crazyflie_lib::Crazyflie;
 use crazyflie_link::LinkContext;
-use std::{sync::Arc, time::Duration};
+use std::{rc::Rc, sync::Arc, time::Duration};
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "radio://0/60/2M/E7E7E7E7E7",
     )
     .await?;
-    let cf = Arc::new(cf);
+    let cf = Rc::new(cf);
 
     let cf_task = cf.clone();
     async_std::task::spawn_local(async move {
