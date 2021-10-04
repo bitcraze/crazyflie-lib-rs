@@ -1,4 +1,40 @@
-use crate::WaitForPacket;
+//! # Data logging subsystem
+//!
+//! The Crazyflie log subsystem allows to asynchronously log the value of exposed Crazyflie variables from the ground.
+//!
+//! At connection time, a Table Of Content (TOC) of the log variable is fetched from the Crazyflie which allows to
+//! log variables using their names. To log variable a [LogBlock] needs to be created. The variable to be logged are
+//! added to the LogBlock and then the LogBlock can be started returning a LogStream that will yield the log datas.
+//!
+//! ```no_run
+//! # use crazyflie_lib::{Crazyflie, Value, Error};
+//! # use async_executors::AsyncStd;
+//! # use crazyflie_link::LinkContext;
+//! # use std::sync::Arc;
+//! # async fn example() -> Result<(), Error> {
+//! # let context = LinkContext::new(Arc::new(AsyncStd));
+//! # let cf = Crazyflie::connect_from_uri(AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
+//! // Create the log block
+//! let mut block = cf.log.create_block().await?;
+//!
+//! // Append Variables
+//! block.add_variable("stateEstimate.roll").await?;
+//! block.add_variable("stateEstimate.pitch").await?;
+//! block.add_variable("stateEstimate.yaw").await?;
+//!
+//! // Start the block
+//! let period = crazyflie_lib::subsystems::log::LogPeriod::from_millis(100)?;
+//! let stream = block.start(period).await?;
+//!
+//! // Get Data!
+//! while let Ok(data) = stream.next().await {
+//!     println!("Yaw is {:?}", data.data["stateEstimate.yaw"]);
+//! }
+//! # Ok(())
+//! # };
+//! ```
+
+use crate::crtp_utils::WaitForPacket;
 use crate::{Error, Result, Value, ValueType};
 use crazyflie_link::Packet;
 use flume as channel;
@@ -33,49 +69,15 @@ const RESET: u8 = 5;
 const CREATE_BLOCK_V2: u8 = 6;
 const APPEND_BLOCK_V2: u8 = 7;
 
-/// Crazyflie Log subsystem
-///
-/// The Crazyflie log subsystem allows to asynchronously log the value of exposed Crazyflie variables from the ground.
-///
-/// At connection time, a Table Of Content (TOC) of the log variable is fetched from the Crazyflie which allows to
-/// log variables using their names. To log variable a [LogBlock] needs to be created. The variable to be logged are
-/// added to the LogBlock and then the LogBlock can be started returning a LogStream that will yield the log datas.
-///
-/// ```no_run
-/// # use crazyflie_lib::{Crazyflie, Value, Error};
-/// # use async_executors::AsyncStd;
-/// # use crazyflie_link::LinkContext;
-/// # use std::sync::Arc;
-/// # async fn example() -> Result<(), Error> {
-/// # let context = LinkContext::new(Arc::new(AsyncStd));
-/// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await;
-/// // Create the log block
-/// let block = cf.log.create_block();
-///
-/// // Append Variables
-/// block.add_variable("stateEstimate.roll").await?;
-/// block.add_variable("stateEstimate.pitch").await?;
-/// block.add_variable("stateEstimate.yaw").await?;
-///
-/// // Start the block
-/// let stream = block.start().await;
-///
-/// // Get Data!
-/// while let Ok(data) = stream.next().await {
-///     println("Yaw is {:?}", data.data["stateEstimate.yaw"]);
-/// }
-/// # Ok(())
-/// # };
-/// ```
 impl Log {
     pub(crate) async fn new(
         downlink: channel::Receiver<Packet>,
         uplink: channel::Sender<Packet>,
     ) -> Result<Self> {
         let (toc_downlink, control_downlink, data_downlink, _) =
-            crate::crtp_channel_dispatcher(downlink);
+            crate::crtp_utils::crtp_channel_dispatcher(downlink);
 
-        let toc = crate::fetch_toc(LOG_PORT, uplink.clone(), toc_downlink).await?;
+        let toc = crate::crtp_utils::fetch_toc(LOG_PORT, uplink.clone(), toc_downlink).await?;
         let toc = Arc::new(toc);
 
         let control_downlink = Arc::new(Mutex::new(control_downlink));

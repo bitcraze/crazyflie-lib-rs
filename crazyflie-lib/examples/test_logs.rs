@@ -1,5 +1,5 @@
 use async_executors::AsyncStd;
-use crazyflie_lib::{log::LogPeriod, Crazyflie};
+use crazyflie_lib::{subsystems::log::LogPeriod, Crazyflie};
 use crazyflie_link::LinkContext;
 use std::{convert::TryInto, sync::Arc, time::Duration};
 

@@ -1,6 +1,21 @@
+//! # Parameter subsystem
+//! 
+//! The Crazyflie exposes a param subsystem that allows to easily declare parameter
+//! variables in the Crazyflie and to discover, read and write them from the ground.
+//!
+//! Variables are defined in a table of content that is downloaded uppon connection.
+//! Each param variable have a unique name composed from a group and a variable name.
+//! Functions that accesses variables, take a `name` parameter that accepts a string
+//! in the format "group.variable"
+//!
+//! During connection, the full param table of content is downloaded form the
+//! Crazyflie as well as the values of all the variable. If a variable value
+//! is modified by the Crazyflie during runtime, it sends a packet with the new
+//! value which updates the local value cache.
+
 use half::prelude::*;
 
-use crate::{Error, Result, WaitForPacket};
+use crate::{Error, Result, crtp_utils::WaitForPacket};
 use crate::{Value, ValueType};
 use crazyflie_link::Packet;
 use flume as channel;
@@ -46,20 +61,12 @@ impl TryFrom<u8> for ParamItemInfo {
     }
 }
 
+type ParamChangeWatchers = Arc<Mutex<Vec<futures::channel::mpsc::UnboundedSender<(String, Value)>>>>;
+
 /// # Access to the Crazyflie Param Subsystem
 ///
-/// The Crazyflie exposes a param subsystem that allows to easily declare parameter
-/// variables in the Crazyflie and to discover, read and write them from the ground.
-///
-/// Variables are defined in a table of content that is downloaded uppon connection.
-/// Each param variable have a unique name composed from a group and a variable name.
-/// Functions that accesses variables, take a `name` parameter that accepts a string
-/// in the format "group.variable"
-///
-/// During connection, the full param table of content is downloaded form the
-/// Crazyflie as well as the values of all the variable. If a variable value
-/// is modified by the Crazyflie during runtime, it sends a packet with the new
-/// value which updates the local value cache.
+/// This struct provide methods to interact with the parameter subsystem. See the
+/// [param module documentation](crate::subsystems::param) for more context and information.
 #[derive(Debug)]
 pub struct Param {
     uplink: channel::Sender<Packet>,
@@ -67,7 +74,7 @@ pub struct Param {
     write_downlink: Mutex<channel::Receiver<Packet>>,
     toc: Arc<BTreeMap<String, (u16, ParamItemInfo)>>,
     values: Arc<Mutex<HashMap<String, Value>>>,
-    watchers: Arc<Mutex<Vec<futures::channel::mpsc::UnboundedSender<(String, Value)>>>>,
+    watchers: ParamChangeWatchers,
 }
 
 fn not_found(name: &str) -> Error {
@@ -85,9 +92,9 @@ impl Param {
         uplink: channel::Sender<Packet>,
     ) -> Result<Self> {
         let (toc_downlink, read_downlink, write_downlink, misc_downlink) =
-            crate::crtp_channel_dispatcher(downlink);
+            crate::crtp_utils::crtp_channel_dispatcher(downlink);
 
-        let toc = crate::fetch_toc(PARAM_PORT, uplink.clone(), toc_downlink).await?;
+        let toc = crate::crtp_utils::fetch_toc(PARAM_PORT, uplink.clone(), toc_downlink).await?;
 
         let mut param = Self {
             uplink,
@@ -213,7 +220,7 @@ impl Param {
     /// # use std::sync::Arc;
     /// # async fn example() -> Result<(), Error> {
     /// # let context = LinkContext::new(Arc::new(AsyncStd));
-    /// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await;
+    /// # let cf = Crazyflie::connect_from_uri(AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
     /// cf.param.set("example.param", 42u16).await?;  // From primitive
     /// cf.param.set("example.param", Value::U16(42)).await?;  // From Value
     /// # Ok(())
@@ -268,12 +275,12 @@ impl Param {
     /// the return parameter. For example to get a u16 param:
     /// ```no_run
     /// # use crazyflie_lib::{Crazyflie, Value, Error};
-    /// # use async_executors::AsyncStd;
     /// # use crazyflie_link::LinkContext;
+    /// # use async_executors::AsyncStd;
     /// # use std::sync::Arc;
     /// # async fn example() -> Result<(), Error> {
     /// # let context = LinkContext::new(Arc::new(AsyncStd));
-    /// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await;
+    /// # let cf = Crazyflie::connect_from_uri(AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
     /// let example: u16 = cf.param.get("example.param").await?;  // To primitive
     /// dbg!(example);  // 42
     /// let example: Value = cf.param.get("example.param").await?;  // To Value
