@@ -22,7 +22,7 @@
 //! 
 //! ## Compatibility
 //! 
-//! This crate is compatible with Crazyflie protocol vertion > 4, ie. >= 2018.08.
+//! This crate is compatible with Crazyflie protocol version > 4. This means Crazyflie firmware release >= 2018.08.
 //! 
 //! ## Usage
 //! 
