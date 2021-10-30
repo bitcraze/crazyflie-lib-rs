@@ -11,12 +11,14 @@
 //! 
 //! | Subsystem | Support |
 //! |-----------|---------|
-//! | Platform | None |
-//! | Log | Full (V2) |
-//! | Param | Full(V2) |
+//! | App channel | None |
 //! | Commander | Partial (only RPYT) |
-//! | Memory | None |
 //! | High-level Commander | None |
+//! | Localization | None |
+//! | Log | Full (V2) |
+//! | Memory | None |
+//! | Param | Full(V2) |
+//! | Platform | None |
 //! 
 //! ## Compatibility
 //! 
