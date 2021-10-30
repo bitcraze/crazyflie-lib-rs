@@ -35,7 +35,7 @@ impl Crazyflie {
 
     /// Open a Crazyflie connection to a given URI
     /// 
-    /// This function opens a link to the given URI and calls [connect_from_link()] to connect the Crazyflie.
+    /// This function opens a link to the given URI and calls [Crazyflie::connect_from_link()] to connect the Crazyflie.
     ///
     /// The executor argument should be an async executor from the crate `async_executors`. See example in the
     /// [crate root documentation](crate).

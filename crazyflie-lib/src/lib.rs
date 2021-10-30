@@ -46,8 +46,8 @@
 //! // Scann for Crazyflies on the default address
 //! let found = link_context.scan([0xE7; 5]).await?;
 //! 
-//! if !found.is_empty() {
-//!     let cf = crazyflie_lib::Crazyflie::connect_from_uri(async_executors::AsyncStd, &link_context, &found[0]).await?;
+//! if let Some(uri) = found.first() {
+//!     let cf = crazyflie_lib::Crazyflie::connect_from_uri(async_executors::AsyncStd, &link_context, uri).await?;
 //! 
 //!     println!("List of params variables: ");
 //!     for name in cf.param.names() {
@@ -59,7 +59,7 @@
 //!         println!(" - {}", name);
 //!     }
 //! 
-//!     cf.disconnect();
+//!     cf.disconnect().await;
 //! }
 //! # Ok(())
 //! # }
