@@ -35,7 +35,12 @@ impl Crazyflie {
 
     /// Open a Crazyflie connection to a given URI
     /// 
-    /// 
+    /// This function opens a link to the given URI and calls [connect_from_link()] to connect the Crazyflie.
+    ///
+    /// The executor argument should be an async executor from the crate `async_executors`. See example in the
+    /// [crate root documentation](crate).
+    ///
+    /// An error is returned either if the link cannot be opened or if the Crazyflie connection fails.
     pub async fn connect_from_uri(
         executor: impl Executor,
         link_context: &crazyflie_link::LinkContext,
@@ -46,6 +51,14 @@ impl Crazyflie {
         Self::connect_from_link(executor, link).await
     }
 
+    /// Connect a Crazyflie using an existing link
+    ///
+    /// Connect a Crazyflie using an existing connected link.
+    ///
+    /// The executor argument should be an async executor from the crate `async_executors`. See example in the
+    /// [crate root documentation](crate).
+    ///
+    /// This function will return an error if anything goes wront in the connection prosses.
     pub async fn connect_from_link(
         executor: impl Executor,
         link: crazyflie_link::Connection,
@@ -110,6 +123,13 @@ impl Crazyflie {
         })
     }
 
+    /// Disconnect the Crazyflie
+    ///
+    /// The Connection can be ended in two ways: either by dropping the [Crazyflie] object or by calling this
+    /// disconnect() function. Once this function return, the Crazyflie is fully disconnected.
+    ///
+    /// Once disconnected, any methods that uses the communication to the Crazyflie will return the error
+    /// [Error::Disconnected]
     pub async fn disconnect(&self) {
         // Set disconnect to true, will make both uplink and dispatcher task quit
         self.disconnect.store(true, Relaxed);
@@ -125,6 +145,13 @@ impl Crazyflie {
         self.link.close().await;
     }
 
+    /// Wait for the Crazyflie to be disconnected
+    ///
+    /// This function waits for the Crazyflie link to close and for the Crazyflie to fully disconnect. It returns
+    /// a string describing the reason for the disconnection.
+    ///
+    /// One intended use if to call and block on this function from an async task to detect a disconnection and, for
+    /// example, update the state of a GUI.
     pub async fn wait_disconnect(&self) -> String {
         let reason = self.link.wait_close().await;
 
