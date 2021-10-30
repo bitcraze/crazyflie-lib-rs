@@ -210,8 +210,7 @@ impl Param {
     /// This function accepts any pritimive type as well as the [Value](crate::Value) type. The
     /// type of the param variable is checked at runtime and must match the type
     /// given to the function, either the direct primitive type or the type
-    /// contained in the `Value` enum. For example, to write a u16 value, one
-    /// would write:
+    /// contained in the `Value` enum. For example, to write a u16 value, both lines are valid:
     ///
     /// ```no_run
     /// # use crazyflie_lib::{Crazyflie, Value, Error};
@@ -310,7 +309,7 @@ impl Param {
     ///
     /// This function is a forgiving version of the `set` function. It allows
     /// to set any parameter of any type from a `f64` value. This allows to set
-    /// parameters without caring about the type and risking a type conversion
+    /// parameters without caring about the type and risking a type mismatch
     /// runtime error. Since there is no type or value check, loss of information
     /// can happen when using this function.
     ///
@@ -319,7 +318,7 @@ impl Param {
     ///    - Example: Setting `257` to a `u8` variable will set it to the value `1`
     ///  - Similarly floating point precision will be truncated to the parameter precision. Rounding is undefined.
     ///  - Setting a floating point outside the range of the parameter is undefined.
-    ///  - It is not possible to represent accuratly a `u64` parameter in a `f64`.
+    ///  - It is not possible to represent accurately a `u64` parameter in a `f64`.
     ///
     /// Returns an error if the param does not exists.
     pub async fn set_lossy(&self, name: &str, value: f64) -> Result<()> {
@@ -351,12 +350,12 @@ impl Param {
     ///
     /// This function is a forgiving version of the `get` function. It allows
     /// to get any parameter of any type as a `f64` value. This allows to get
-    /// parameters without caring about the type and risking a type conversion
+    /// parameters without caring about the type and risking a type mismatch
     /// runtime error. Since there is no type or value check, loss of information
     /// can happen when using this function.
     ///
     /// Loss of information can happen in the following cases:
-    ///  - It is not possible to represent accuratly a `u64` parameter in a `f64`.
+    ///  - It is not possible to represent accurately a `u64` parameter in a `f64`.
     ///
     /// Returns an error if the param does not exists.
     pub async fn get_lossy(&self, name: &str) -> Result<f64> {
