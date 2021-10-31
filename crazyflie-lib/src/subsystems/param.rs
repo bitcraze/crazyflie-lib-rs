@@ -13,8 +13,6 @@
 //! is modified by the Crazyflie during runtime, it sends a packet with the new
 //! value which updates the local value cache.
 
-use half::prelude::*;
-
 use crate::{Error, Result, crtp_utils::WaitForPacket};
 use crate::{Value, ValueType};
 use crazyflie_link::Packet;
@@ -329,19 +327,7 @@ impl Param {
             .1
             .item_type;
 
-        let value = match param_type {
-            ValueType::U8 => Value::U8((value as u64) as u8),
-            ValueType::U16 => Value::U16((value as u64) as u16),
-            ValueType::U32 => Value::U32((value as u64) as u32),
-            ValueType::U64 => Value::U64((value as u64) as u64),
-            ValueType::I8 => Value::I8((value as i64) as i8),
-            ValueType::I16 => Value::I16((value as i64) as i16),
-            ValueType::I32 => Value::I32((value as i64) as i32),
-            ValueType::I64 => Value::I64((value as i64) as i64),
-            ValueType::F16 => Value::F16(f16::from_f64(value)),
-            ValueType::F32 => Value::F32(value as f32),
-            ValueType::F64 => Value::F64(value),
-        };
+        let value = Value::from_f64_lossy(param_type, value);
 
         self.set(name, value).await
     }
@@ -361,19 +347,7 @@ impl Param {
     pub async fn get_lossy(&self, name: &str) -> Result<f64> {
         let value: Value = self.get(name).await?;
 
-        Ok(match value {
-            Value::U8(v) => v as f64,
-            Value::U16(v) => v as f64,
-            Value::U32(v) => v as f64,
-            Value::U64(v) => v as f64,
-            Value::I8(v) => v as f64,
-            Value::I16(v) => v as f64,
-            Value::I32(v) => v as f64,
-            Value::I64(v) => v as f64,
-            Value::F16(v) => v.to_f64(),
-            Value::F32(v) => v as f64,
-            Value::F64(v) => v as f64,
-        })
+        Ok(value.to_f64_lossy())
     }
 
     pub async fn watch_change(&self) -> impl futures::Stream<Item = (String, Value)> {

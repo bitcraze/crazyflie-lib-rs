@@ -1,6 +1,28 @@
 use half::f16;
 use std::convert::{TryFrom, TryInto};
 
+/// # Typed data value
+/// 
+/// This enum supports all the data types that can be exchanged with the Crazyflie
+/// using the [log](crate::subsystems::log) and [param](crate::subsystems::param) subsystems.
+/// 
+/// A function allows to convert a `[u8]` to a [Value] and the [Into<Vec<U8>>]
+/// trait is implemented to convert a [Value] into a vector of bytes. 
+/// 
+/// The [TryFrom] trait is implemented for all matching rust primitive type. There
+/// is only direct conversion implemented. For example the following is OK:
+/// ```
+/// # use std::convert::TryInto;
+/// # use crazyflie_lib::Value;
+/// let v:u32 = Value::U32(42).try_into().unwrap();
+/// ```
+/// 
+/// However the following **will panic**:
+/// ``` should_panic
+/// # use std::convert::TryInto;
+/// # use crazyflie_lib::Value;
+/// let v:u32 = Value::U8(42).try_into().unwrap();
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
     U8(u8),
@@ -31,6 +53,9 @@ pub enum ValueType {
     F64,
 }
 
+/// # Value type
+/// 
+/// This enum contains all the possible type of a [Value]
 impl ValueType {
     pub fn byte_length(&self) -> usize {
         match self {
@@ -108,6 +133,8 @@ primitive_impl!(f64, F64);
 
 // Conversion from and to u8 slice (little endian serde)
 impl Value {
+    /// Convert a `&[u8]` slice to a [Value]. The length of the slice must match
+    /// the length of the value type, otherwise an error will be returned.
     pub fn from_le_bytes(bytes: &[u8], value_type: ValueType) -> Result<Value, crate::Error> {
         match value_type {
             ValueType::U8 => Ok(Value::U8(u8::from_le_bytes(bytes.try_into()?))),
@@ -124,6 +151,10 @@ impl Value {
         }
     }
 
+    /// Convert a [Value] to a [f64].
+    /// 
+    /// This conversion is lossless in most case but can be lossy if the value
+    /// is a u64: a f64 cannot accurately store large values of a u64.
     pub fn to_f64_lossy(&self) -> f64 {
         match *self {
             Value::U8(v) => v as f64,
@@ -137,6 +168,32 @@ impl Value {
             Value::F16(v) => v.to_f64(),
             Value::F32(v) => v as f64,
             Value::F64(v) => v as f64,
+        }
+    }
+
+    /// Make a [Value] from a [f64] and a [ValueType]
+    /// 
+    /// This function allows to construct any type of value from a f64.
+    /// 
+    /// The conversion has possibility to be lossy in a couple of cases:
+    ///  - When making an integer, the value is truncated to the number of bit of the parameter
+    ///    - Example: Setting `257` to a `u8` variable will set it to the value `1`
+    ///  - Similarly floating point precision will be truncated to the parameter precision. Rounding is undefined.
+    ///  - Making a floating point outside the range of the parameter is undefined.
+    ///  - It is not possible to represent accurately a `u64` parameter in a `f64`.
+    pub fn from_f64_lossy(value_type: ValueType, value: f64) -> Value {
+        match value_type {
+            ValueType::U8 => Value::U8((value as u64) as u8),
+            ValueType::U16 => Value::U16((value as u64) as u16),
+            ValueType::U32 => Value::U32((value as u64) as u32),
+            ValueType::U64 => Value::U64((value as u64) as u64),
+            ValueType::I8 => Value::I8((value as i64) as i8),
+            ValueType::I16 => Value::I16((value as i64) as i16),
+            ValueType::I32 => Value::I32((value as i64) as i32),
+            ValueType::I64 => Value::I64((value as i64) as i64),
+            ValueType::F16 => Value::F16(f16::from_f64(value)),
+            ValueType::F32 => Value::F32(value as f32),
+            ValueType::F64 => Value::F64(value),
         }
     }
 }
