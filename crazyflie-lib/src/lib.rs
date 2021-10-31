@@ -1,6 +1,6 @@
 //! # Crazyflie library
 //! 
-//! This crate allows to connect, communicate with and control the Crazylfie using the [crazyflie-link] crate
+//! This crate allows to connect, communicate with and control the Crazyflie using the [crazyflie-link] crate
 //! to open a communication link. The link implementation only supports radio for now, but more will be implemented
 //! in the future (at least USB).
 //! 
@@ -43,7 +43,7 @@
 //! # async fn test() -> Result<(), Box<dyn std::error::Error>> {
 //! let link_context = crazyflie_link::LinkContext::new(Arc::new(async_executors::AsyncStd));
 //! 
-//! // Scann for Crazyflies on the default address
+//! // Scan for Crazyflies on the default address
 //! let found = link_context.scan([0xE7; 5]).await?;
 //! 
 //! if let Some(uri) = found.first() {

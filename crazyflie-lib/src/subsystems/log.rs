@@ -4,7 +4,7 @@
 //!
 //! At connection time, a Table Of Content (TOC) of the log variable is fetched from the Crazyflie which allows to
 //! log variables using their names. To log variable a [LogBlock] needs to be created. The variable to be logged are
-//! added to the LogBlock and then the LogBlock can be started returning a LogStream that will yield the log datas.
+//! added to the LogBlock and then the LogBlock can be started returning a LogStream that will yield the log data.
 //!
 //! ```no_run
 //! # use crazyflie_lib::{Crazyflie, Value, Error, subsystems::log::LogPeriod};
@@ -413,7 +413,7 @@ impl LogBlock {
             .await?;
         if answer.get_data().len() != 3 {
             return Err(Error::ProtocolError(
-                "Mallformed Log control packet".to_owned(),
+                "Malformed Log control packet".to_owned(),
             ));
         }
         let error_code = answer.get_data()[2];
