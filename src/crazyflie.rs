@@ -16,13 +16,16 @@ use crate::{Error, Result};
 /// # The Crazyflie
 /// 
 /// This struct is one-time use: Creating it will connect to a Crazyflie and once disconnected, either as requested
-/// by the lib user or as a result of a connection loss, the object cannot be reconected. A new one need to be created
+/// by the lib user or as a result of a connection loss, the object cannot be reconnected. A new one need to be created
 /// to connect again.
 /// 
 /// See the [crazyflie-lib crate root documentation](crate) for more context and information.
 pub struct Crazyflie {
+    /// Log subsystem access
     pub log: Log,
+    /// Parameter subsystem access
     pub param: Param,
+    /// Commander/setpoint subsystem access
     pub commander: Commander,
     pub(crate) _executor: Arc<dyn Executor>,
     uplink_task: Mutex<Option<JoinHandle<()>>>,
@@ -58,7 +61,7 @@ impl Crazyflie {
     /// The executor argument should be an async executor from the crate `async_executors`. See example in the
     /// [crate root documentation](crate).
     ///
-    /// This function will return an error if anything goes wront in the connection prosses.
+    /// This function will return an error if anything goes wrong in the connection process.
     pub async fn connect_from_link(
         executor: impl Executor,
         link: crazyflie_link::Connection,
@@ -108,7 +111,7 @@ impl Crazyflie {
         // Start the downlink packet dispatcher
         let dispatch_task = dispatcher.run().await?;
 
-        // Intitialize all modules in parallel
+        // Initialize all modules in parallel
         let (log, param) = futures::join!(log, param);
 
         Ok(Crazyflie {

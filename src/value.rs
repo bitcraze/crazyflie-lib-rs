@@ -25,38 +25,61 @@ use std::convert::{TryFrom, TryInto};
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
+    /// [u8] value
     U8(u8),
+    /// [u16] value
     U16(u16),
+    /// [u32] value
     U32(u32),
+    /// [u64] value
     U64(u64),
+    /// [i8] value
     I8(i8),
+    /// [i16] value
     I16(i16),
+    /// [i32] value
     I32(i32),
+    /// [i64] value
     I64(i64),
+    /// [f16] value
     F16(f16),
+    /// [f32] value
     F32(f32),
+    /// [f64] value
     F64(f64),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValueType {
-    U8,
-    U16,
-    U32,
-    U64,
-    I8,
-    I16,
-    I32,
-    I64,
-    F16,
-    F32,
-    F64,
 }
 
 /// # Value type
 /// 
 /// This enum contains all the possible type of a [Value]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueType {
+    /// Type of a [u8] value
+    U8,
+    /// Type of a [u16] value
+    U16,
+    /// Type of a [u32] value
+    U32,
+    /// Type of a [u64] value
+    U64,
+    /// Type of a [i8] value
+    I8,
+    /// Type of a [i16] value
+    I16,
+    /// Type of a [i32] value
+    I32,
+    /// Type of a [i64] value
+    I64,
+    /// Type of a [f12] value
+    F16,
+    /// Type of a [f32] value
+    F32,
+    /// Type of a [f64] value
+    F64,
+}
+
 impl ValueType {
+    /// Return the byte length of a value according to its type
     pub fn byte_length(&self) -> usize {
         match self {
             ValueType::U8 => 1,

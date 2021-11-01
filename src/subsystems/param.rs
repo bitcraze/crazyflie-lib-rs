@@ -350,6 +350,18 @@ impl Param {
         Ok(value.to_f64_lossy())
     }
 
+    /// Get notified for all parameter value change
+    /// 
+    /// This function returns an async stream that will generate a tuple containing
+    /// the name of the variable that has changed (in the form of group.name)
+    /// and its new value.
+    /// 
+    /// There can be two reasons for a parameter to change:
+    ///  - Either the parameter was changed by a call to [Param::set()]. The
+    ///    notification will be generated when the Crazyflie confirms the parameter
+    ///    has been set.
+    ///  - Or it can be a parameter change in the Crazyflie itself. The Crazyflie
+    ///    will send notification packet for every internal parameter change.
     pub async fn watch_change(&self) -> impl futures::Stream<Item = (String, Value)> {
         let (tx, rx) = futures::channel::mpsc::unbounded();
 
