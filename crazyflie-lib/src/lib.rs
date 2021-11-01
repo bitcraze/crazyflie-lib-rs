@@ -65,6 +65,8 @@
 //! # }
 //! ```
 
+#![warn(missing_docs)]
+
 mod error;
 mod value;
 mod crazyflie;

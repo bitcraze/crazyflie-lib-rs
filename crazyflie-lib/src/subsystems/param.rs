@@ -3,7 +3,7 @@
 //! The Crazyflie exposes a param subsystem that allows to easily declare parameter
 //! variables in the Crazyflie and to discover, read and write them from the ground.
 //!
-//! Variables are defined in a table of content that is downloaded uppon connection.
+//! Variables are defined in a table of content that is downloaded upon connection.
 //! Each param variable have a unique name composed from a group and a variable name.
 //! Functions that accesses variables, take a `name` parameter that accepts a string
 //! in the format "group.variable"
@@ -160,7 +160,7 @@ impl Param {
                         // The param is tested as being in the toc so this unwrap cannot fail.
                         *values.lock().await.get_mut(param).unwrap() = value;
                     } else {
-                        println!("Warning: Mallformed param update");
+                        println!("Warning: Malformed param update");
                     }
                 } else {
                     println!("Warning: malformed param update");
@@ -171,7 +171,7 @@ impl Param {
 
     /// Get the names of all the parameters
     ///
-    /// The names contain group and name of the parameter variable formated as
+    /// The names contain group and name of the parameter variable formatted as
     /// "group.name".
     pub fn names(&self) -> Vec<String> {
         self.toc.keys().cloned().collect()
@@ -202,10 +202,10 @@ impl Param {
     /// Set a parameter value.
     ///
     /// This function will set the variable value and wait for confirmation from the
-    /// Crazyflie. If the set is successfull `Ok(())` is returned, otherwise the
+    /// Crazyflie. If the set is successful `Ok(())` is returned, otherwise the
     /// error code reported by the Crazyflie is returned in the error.
     ///
-    /// This function accepts any pritimive type as well as the [Value](crate::Value) type. The
+    /// This function accepts any primitive type as well as the [Value](crate::Value) type. The
     /// type of the param variable is checked at runtime and must match the type
     /// given to the function, either the direct primitive type or the type
     /// contained in the `Value` enum. For example, to write a u16 value, both lines are valid:
@@ -265,7 +265,7 @@ impl Param {
 
     /// Get param value
     ///
-    /// Get value of a parameter. This frunction takes the value from a local
+    /// Get value of a parameter. This function takes the value from a local
     /// cache and so is quick.
     ///
     /// Similarly to the `set` function above, the type of the param must match
