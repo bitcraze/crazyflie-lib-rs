@@ -85,9 +85,14 @@ pub(crate) use async_std::task::spawn;
 #[cfg(feature = "wasm-bindgen-futures")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use trait_set::trait_set;
 use async_executors::{LocalSpawnHandle, Timer};
 
-trait_set! {
-    pub trait Executor = LocalSpawnHandle<()> + Timer + 'static
-}
+/// Async executor trait
+/// 
+/// This trait is implemented in the `async_executors` crate for common async
+/// executors. See example in the [crate root documentation](crate).
+pub trait Executor: LocalSpawnHandle<()> + Timer + 'static {}
+
+// Until trait alias makes it in stable rust, we need an empty implementation
+// for this trait ...
+impl<U> Executor for U where U: LocalSpawnHandle<()> + Timer + 'static {}

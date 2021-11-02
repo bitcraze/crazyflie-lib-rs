@@ -70,7 +70,7 @@ pub enum ValueType {
     I32,
     /// Type of a [i64] value
     I64,
-    /// Type of a [f12] value
+    /// Type of a [f16] value
     F16,
     /// Type of a [f32] value
     F32,
