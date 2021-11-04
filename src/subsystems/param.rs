@@ -1,5 +1,5 @@
 //! # Parameter subsystem
-//! 
+//!
 //! The Crazyflie exposes a param subsystem that allows to easily declare parameter
 //! variables in the Crazyflie and to discover, read and write them from the ground.
 //!
@@ -13,7 +13,7 @@
 //! is modified by the Crazyflie during runtime, it sends a packet with the new
 //! value which updates the local value cache.
 
-use crate::{Error, Result, crtp_utils::WaitForPacket};
+use crate::{crtp_utils::WaitForPacket, Error, Result};
 use crate::{Value, ValueType};
 use crazyflie_link::Packet;
 use flume as channel;
@@ -59,7 +59,8 @@ impl TryFrom<u8> for ParamItemInfo {
     }
 }
 
-type ParamChangeWatchers = Arc<Mutex<Vec<futures::channel::mpsc::UnboundedSender<(String, Value)>>>>;
+type ParamChangeWatchers =
+    Arc<Mutex<Vec<futures::channel::mpsc::UnboundedSender<(String, Value)>>>>;
 
 /// # Access to the Crazyflie Param Subsystem
 ///
@@ -212,12 +213,10 @@ impl Param {
     ///
     /// ```no_run
     /// # use crazyflie_lib::{Crazyflie, Value, Error};
-    /// # use async_executors::AsyncStd;
     /// # use crazyflie_link::LinkContext;
-    /// # use std::sync::Arc;
     /// # async fn example() -> Result<(), Error> {
-    /// # let context = LinkContext::new(Arc::new(AsyncStd));
-    /// # let cf = Crazyflie::connect_from_uri(AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
+    /// # let context = LinkContext::new(async_executors::AsyncStd);
+    /// # let cf = Crazyflie::connect_from_uri(async_executors::AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
     /// cf.param.set("example.param", 42u16).await?;  // From primitive
     /// cf.param.set("example.param", Value::U16(42)).await?;  // From Value
     /// # Ok(())
@@ -273,11 +272,9 @@ impl Param {
     /// ```no_run
     /// # use crazyflie_lib::{Crazyflie, Value, Error};
     /// # use crazyflie_link::LinkContext;
-    /// # use async_executors::AsyncStd;
-    /// # use std::sync::Arc;
     /// # async fn example() -> Result<(), Error> {
-    /// # let context = LinkContext::new(Arc::new(AsyncStd));
-    /// # let cf = Crazyflie::connect_from_uri(AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
+    /// # let context = LinkContext::new(async_executors::AsyncStd);
+    /// # let cf = Crazyflie::connect_from_uri(async_executors::AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
     /// let example: u16 = cf.param.get("example.param").await?;  // To primitive
     /// dbg!(example);  // 42
     /// let example: Value = cf.param.get("example.param").await?;  // To Value
@@ -351,11 +348,11 @@ impl Param {
     }
 
     /// Get notified for all parameter value change
-    /// 
+    ///
     /// This function returns an async stream that will generate a tuple containing
     /// the name of the variable that has changed (in the form of group.name)
     /// and its new value.
-    /// 
+    ///
     /// There can be two reasons for a parameter to change:
     ///  - Either the parameter was changed by a call to [Param::set()]. The
     ///    notification will be generated when the Crazyflie confirms the parameter

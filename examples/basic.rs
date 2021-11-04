@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
 // Example scans for Crazyflies, connect the first one and print the log and param variables TOC.
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let link_context = crazyflie_link::LinkContext::new(Arc::new(async_executors::AsyncStd));
+    let link_context = crazyflie_link::LinkContext::new(async_executors::AsyncStd);
 
     // Scann for Crazyflies on the default address
     let found = link_context.scan([0xE7; 5]).await?;

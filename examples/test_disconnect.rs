@@ -1,13 +1,12 @@
-use async_executors::AsyncStd;
 use crazyflie_lib::Crazyflie;
 use crazyflie_link::LinkContext;
-use std::{rc::Rc, sync::Arc, time::Duration};
+use std::{rc::Rc, time::Duration};
 
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let context = LinkContext::new(Arc::new(AsyncStd));
+    let context = LinkContext::new(async_executors::AsyncStd);
 
     println!("First connection ...");
     let cf = Crazyflie::connect_from_uri(

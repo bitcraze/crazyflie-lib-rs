@@ -1,9 +1,13 @@
 //! Various CRTP utils used by the lib
-//! 
+//!
 //! These functionalities are currently all private, some might be useful for the user code as well, lets make them
 //! public when needed.
 
-
+use crate::spawn;
+use crate::{Error, Executor, Result};
+use async_executors::JoinHandle;
+use async_executors::LocalSpawnHandleExt;
+use async_executors::TimerExt;
 use async_trait::async_trait;
 use crazyflie_link::Packet;
 use flume as channel;
@@ -16,11 +20,6 @@ use std::{
     convert::{TryFrom, TryInto},
     sync::Arc,
 };
-use crate::spawn;
-use crate::{Error, Result, Executor};
-use async_executors::TimerExt;
-use async_executors::LocalSpawnHandleExt;
-use async_executors::JoinHandle;
 
 pub struct CrtpDispatch {
     link: Arc<crazyflie_link::Connection>,

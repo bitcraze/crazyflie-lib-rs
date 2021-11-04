@@ -1,24 +1,24 @@
+use crate::subsystems::commander::Commander;
 use crate::subsystems::log::Log;
 use crate::subsystems::param::Param;
-use crate::subsystems::commander::Commander;
 
+use crate::crtp_utils::CrtpDispatch;
+use crate::Executor;
+use crate::{Error, Result};
 use async_executors::{JoinHandle, LocalSpawnHandleExt, TimerExt};
 use flume as channel;
 use futures::lock::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use std::time::Duration;
 use std::sync::Arc;
-use crate::Executor;
-use crate::crtp_utils::CrtpDispatch;
-use crate::{Error, Result};
+use std::time::Duration;
 
 /// # The Crazyflie
-/// 
+///
 /// This struct is one-time use: Creating it will connect to a Crazyflie and once disconnected, either as requested
 /// by the lib user or as a result of a connection loss, the object cannot be reconnected. A new one need to be created
 /// to connect again.
-/// 
+///
 /// See the [crazyflie-lib crate root documentation](crate) for more context and information.
 pub struct Crazyflie {
     /// Log subsystem access
@@ -35,9 +35,8 @@ pub struct Crazyflie {
 }
 
 impl Crazyflie {
-
     /// Open a Crazyflie connection to a given URI
-    /// 
+    ///
     /// This function opens a link to the given URI and calls [Crazyflie::connect_from_link()] to connect the Crazyflie.
     ///
     /// The executor argument should be an async executor from the crate `async_executors`. See example in the

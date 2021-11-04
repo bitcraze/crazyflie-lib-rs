@@ -2,13 +2,13 @@ use half::f16;
 use std::convert::{TryFrom, TryInto};
 
 /// # Typed data value
-/// 
+///
 /// This enum supports all the data types that can be exchanged with the Crazyflie
 /// using the [log](crate::subsystems::log) and [param](crate::subsystems::param) subsystems.
-/// 
+///
 /// A function allows to convert a `[u8]` to a [Value] and the [Into<Vec<U8>>]
-/// trait is implemented to convert a [Value] into a vector of bytes. 
-/// 
+/// trait is implemented to convert a [Value] into a vector of bytes.
+///
 /// The [TryFrom] trait is implemented for all matching rust primitive type. There
 /// is only direct conversion implemented. For example the following is OK:
 /// ```
@@ -16,7 +16,7 @@ use std::convert::{TryFrom, TryInto};
 /// # use crazyflie_lib::Value;
 /// let v:u32 = Value::U32(42).try_into().unwrap();
 /// ```
-/// 
+///
 /// However the following **will panic**:
 /// ``` should_panic
 /// # use std::convert::TryInto;
@@ -50,7 +50,7 @@ pub enum Value {
 }
 
 /// # Value type
-/// 
+///
 /// This enum contains all the possible type of a [Value]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueType {
@@ -175,7 +175,7 @@ impl Value {
     }
 
     /// Convert a [Value] to a [f64].
-    /// 
+    ///
     /// This conversion is lossless in most case but can be lossy if the value
     /// is a u64: a f64 cannot accurately store large values of a u64.
     pub fn to_f64_lossy(&self) -> f64 {
@@ -195,9 +195,9 @@ impl Value {
     }
 
     /// Make a [Value] from a [f64] and a [ValueType]
-    /// 
+    ///
     /// This function allows to construct any type of value from a f64.
-    /// 
+    ///
     /// The conversion has possibility to be lossy in a couple of cases:
     ///  - When making an integer, the value is truncated to the number of bit of the parameter
     ///    - Example: Setting `257` to a `u8` variable will set it to the value `1`

@@ -8,12 +8,10 @@
 //!
 //! ```no_run
 //! # use crazyflie_lib::{Crazyflie, Value, Error, subsystems::log::LogPeriod};
-//! # use async_executors::AsyncStd;
 //! # use crazyflie_link::LinkContext;
-//! # use std::sync::Arc;
 //! # async fn example() -> Result<(), Error> {
-//! # let context = LinkContext::new(Arc::new(AsyncStd));
-//! # let cf = Crazyflie::connect_from_uri(AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
+//! # let context = LinkContext::new(async_executors::AsyncStd);
+//! # let cf = Crazyflie::connect_from_uri(async_executors::AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
 //! // Create the log block
 //! let mut block = cf.log.create_block().await?;
 //!
@@ -45,9 +43,9 @@ use std::sync::Weak;
 use std::{collections::BTreeMap, convert::TryFrom, sync::Arc, time::Duration};
 
 /// # Access to the Crazyflie Log Subsystem
-/// 
+///
 /// This struct provide functions to interact with the Crazyflie Log subsystem.
-/// 
+///
 /// See the [log module documentation](crate::subsystems::log) for more context and information.
 #[derive(Debug)]
 pub struct Log {
@@ -209,17 +207,17 @@ impl Log {
     }
 
     /// Create a Log block
-    /// 
+    ///
     /// This will create a log block in the Crazyflie firmware and return a
     /// [LogBlock] object that can be used to add variable to the block and start
     /// logging
-    /// 
+    ///
     /// This function can fail if there is no more log block ID available: each
     /// log block is assigned a 8 bit ID by the lib and so far they are not
     /// re-used. So during a Crazyflie connection lifetime, up to 256 log
     /// blocks can be created. If this becomes a problem for any use-case, it
     /// can be solved by a more clever ID generation algorithm.
-    /// 
+    ///
     /// The Crazyflie firmware also has a limit in number of active log block,
     /// this function will fail if this limit is reached. Unlike for the ID, the
     /// active log blocks in the Crazyflie are cleaned-up when the [LogBlock]
@@ -325,12 +323,12 @@ impl TryInto<u8> for LogItemInfo {
 }
 
 /// # Log Block
-/// 
+///
 /// This object represent an IDLE LogBlock in the Crazyflie.
-/// 
+///
 /// If the [LogBlock] object is dropped or its associated [LogStream], the
 /// Log Block will be deleted in the Crazyflie freeing resources.
-/// 
+///
 /// See the [log module documentation](crate::subsystems::log) for more context and information.
 pub struct LogBlock {
     _canary: Arc<()>,
@@ -350,7 +348,7 @@ impl LogBlock {
     /// [LogStream::stop()] can be called on the LogStream to get back the [LogBlock] object.
     ///
     /// This function can fail if there is a protocol error or an error
-    /// reported by the Crazyflie. In such case, the LogBlock object will be 
+    /// reported by the Crazyflie. In such case, the LogBlock object will be
     /// dropped and the block will be deleted in the Crazyflie
     pub async fn start(self, period: LogPeriod) -> Result<LogStream> {
         let control_uplink = self.control_downlink.upgrade().ok_or(Error::Disconnected)?;
@@ -432,13 +430,13 @@ impl LogBlock {
 }
 
 /// # Log Steam
-/// 
+///
 /// This object represents a started log block that is currently returning data
 /// at regular intervals.
-/// 
+///
 /// Dropping this object or the associated [LogBlock] will delete the log block
 /// in the Crazyflie.
-/// 
+///
 /// See the [log module documentation](crate::subsystems::log) for more context and information.
 pub struct LogStream {
     log_block: LogBlock,
@@ -496,9 +494,9 @@ impl LogStream {
 
     /// Get the next log data from the log block stream
     ///
-    /// This function will wait for the data and only return a value when the 
+    /// This function will wait for the data and only return a value when the
     /// next data is available.
-    /// 
+    ///
     /// This function will return an error if the Crazyflie gets disconnected.
     pub async fn next(&self) -> Result<LogData> {
         let packet = self
@@ -535,13 +533,12 @@ impl LogStream {
     }
 }
 
-
 /// # Log data sample
-/// 
+///
 /// This object represents a data sample coming from a started log block. It
 /// provides the Crazyflie timestamp in milliseconds when the data was sampled
 /// and a hash-table of variable name and value.
-/// 
+///
 /// See the [log module documentation](crate::subsystems::log) for more context and information.
 #[derive(Debug)]
 pub struct LogData {
@@ -552,20 +549,20 @@ pub struct LogData {
 }
 
 /// # Log block period
-/// 
+///
 /// This object represent a valid log period. It implements the [TryFrom<Duration>]
 /// trait so it can be constructed from a [Duration] object. a [LogPeriod::from_millis()]
 /// function is provided for convenience.
-/// 
+///
 /// A valid period for a Log block is between 10ms and 2550ms.
-/// 
+///
 /// See the [log module documentation](crate::subsystems::log) for more context and information.
 pub struct LogPeriod(u8);
 
 impl LogPeriod {
     /// Create a LogPeriod object from milliseconds
-    /// 
-    /// Return an error if the millis is not valid. 
+    ///
+    /// Return an error if the millis is not valid.
     /// A valid period for a Log block is between 10ms and 2550ms.
     pub fn from_millis(millis: u64) -> Result<Self> {
         Duration::from_millis(millis).try_into()
