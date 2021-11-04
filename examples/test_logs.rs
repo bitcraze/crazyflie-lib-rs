@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let block = stream.stop().await?;
 
-    println!(" --- Pausing log for 3 secons --- ");
+    println!(" --- Pausing log for 3 seconds --- ");
     async_std::task::sleep(Duration::from_secs(3)).await;
 
     let stream = block.start(LogPeriod::from_millis(10)?).await?;
