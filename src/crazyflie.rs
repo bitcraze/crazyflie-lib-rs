@@ -137,11 +137,11 @@ impl Crazyflie {
         self.disconnect.store(true, Relaxed);
 
         // Wait for both task to finish
-        if self.uplink_task.lock().await.is_some() {
-            self.uplink_task.lock().await.take().unwrap().await
+        if let Some(uplink_task) = self.uplink_task.lock().await.take() {
+            uplink_task.await;
         }
-        if self.dispatch_task.lock().await.is_some() {
-            self.dispatch_task.lock().await.take().unwrap().await
+        if let Some(dispatch_task) = self.dispatch_task.lock().await.take() {
+            dispatch_task.await;
         }
 
         self.link.close().await;
