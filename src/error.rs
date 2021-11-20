@@ -1,5 +1,7 @@
 use std::array::TryFromSliceError;
 
+use futures::task::SpawnError;
+
 /// [Result] alias for return types of the crate API
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -41,5 +43,11 @@ impl From<TryFromSliceError> for Error {
 impl From<crazyflie_link::Error> for Error {
     fn from(error: crazyflie_link::Error) -> Self {
         Self::LinkError(error)
+    }
+}
+
+impl From<SpawnError> for Error {
+    fn from(error: SpawnError) -> Self {
+        Self::SystemError(format!("{}", error))
     }
 }

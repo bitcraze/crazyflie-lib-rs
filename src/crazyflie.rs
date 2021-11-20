@@ -1,4 +1,5 @@
 use crate::subsystems::commander::Commander;
+use crate::subsystems::console::Console;
 use crate::subsystems::log::Log;
 use crate::subsystems::param::Param;
 
@@ -27,6 +28,8 @@ pub struct Crazyflie {
     pub param: Param,
     /// Commander/setpoint subsystem access
     pub commander: Commander,
+    /// Console subsystem access
+    pub console: Console,
     pub(crate) _executor: Arc<dyn Executor>,
     uplink_task: Mutex<Option<JoinHandle<()>>>,
     dispatch_task: Mutex<Option<JoinHandle<()>>>,
@@ -107,6 +110,10 @@ impl Crazyflie {
 
         let commander = Commander::new(uplink.clone());
 
+         // Modules that can be initialized synchrnously
+         let console_downlink = dispatcher.get_port_receiver(0).unwrap();
+         let console = Console::new(executor.clone(), console_downlink).await?;
+
         // Start the downlink packet dispatcher
         let dispatch_task = dispatcher.run().await?;
 
@@ -117,6 +124,7 @@ impl Crazyflie {
             log: log?,
             param: param?,
             commander,
+            console,
             _executor: executor,
             uplink_task: Mutex::new(Some(uplink_task)),
             dispatch_task: Mutex::new(Some(dispatch_task)),

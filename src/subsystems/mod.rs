@@ -11,3 +11,4 @@
 pub mod commander;
 pub mod log;
 pub mod param;
+pub mod console;
