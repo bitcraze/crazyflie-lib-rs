@@ -3,7 +3,7 @@ use std::time::Duration;
 use async_std::future::timeout;
 use futures::StreamExt;
 
-// Example scans for Crazyflies, connect the first one and print the log and param variables TOC.
+// Example scans for Crazyflies, connect the first one and print the console message line by line.
 #[async_std::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let link_context = crazyflie_link::LinkContext::new(async_executors::AsyncStd);

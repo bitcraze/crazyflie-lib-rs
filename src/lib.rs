@@ -13,6 +13,7 @@
 //! |-----------|---------|
 //! | App channel | None |
 //! | Commander | Partial (only RPYT) |
+//! | Console | Full |
 //! | High-level Commander | None |
 //! | Localization | None |
 //! | Log | Full (V2) |
