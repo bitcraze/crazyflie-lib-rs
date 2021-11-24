@@ -11,8 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Scann for Crazyflies on the default address
     let found = link_context.scan([0xE7; 5]).await?;
 
-    if let Some(_uri) = found.last() {
-        let uri = "radio://0/60/2M/E7E7E7E7E7";
+    if let Some(uri) = found.last() {
         println!("Connecting to {} ...", uri);
 
         let cf = crazyflie_lib::Crazyflie::connect_from_uri(
@@ -22,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-        let mut console_stream = cf.console.get_stream().await;
+        let mut console_stream = cf.console.line_stream_no_history().await;
 
         while let Ok(Some(line)) = timeout(Duration::from_secs(10), console_stream.next()).await {
             println!("{}", line);
