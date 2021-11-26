@@ -24,6 +24,10 @@
 //! ## Compatibility
 //!
 //! This crate is compatible with Crazyflie protocol version > 4. This means Crazyflie firmware release >= 2018.08.
+//! 
+//! The Crazyflie guarantees backward functionalities for one protocol version
+//! so this lib will be compatible with version 4 (~2018-08) and 5 (future) of
+//! the protocol.
 //!
 //! ## Usage
 //!
@@ -98,3 +102,8 @@ pub trait Executor: LocalSpawnHandle<()> + Timer + 'static {}
 // Until trait alias makes it in stable rust, we need an empty implementation
 // for this trait ...
 impl<U> Executor for U where U: LocalSpawnHandle<()> + Timer + 'static {}
+
+/// Supported protocol version
+/// 
+/// see [the crate documentation](crate#compatibility) for more information.
+pub const SUPPORTED_PROTOCOL_VERSION: u8 = 4;

@@ -16,15 +16,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-        println!("List of params variables: ");
-        for name in cf.param.names() {
-            println!(" - {}", name);
-        }
+        println!("Connected!");
 
-        println!("List of log variables: ");
-        for name in cf.param.names() {
-            println!(" - {}", name);
-        }
+        let firmware_version = cf.platform.firmware_version().await?;
+        let protocol_version = cf.platform.protocol_version().await?;
+        println!("Firmware version:     {} (protocol {})", firmware_version, protocol_version);
+
+        let device_type = cf.platform.device_type_name().await?;
+        println!("Device type:          {}", device_type);
+
+        println!("Number of params var: {}", cf.param.names().len());
+        println!("Number of log var:    {}", cf.log.names().len());
 
         cf.disconnect().await;
     } else {

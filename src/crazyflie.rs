@@ -4,7 +4,8 @@ use crate::subsystems::log::Log;
 use crate::subsystems::param::Param;
 
 use crate::crtp_utils::CrtpDispatch;
-use crate::Executor;
+use crate::{Executor, SUPPORTED_PROTOCOL_VERSION};
+use crate::subsystems::platform::Platform;
 use crate::{Error, Result};
 use async_executors::{JoinHandle, LocalSpawnHandleExt, TimerExt};
 use flume as channel;
@@ -22,7 +23,7 @@ pub(crate) const _MEMORY_PORT: u8 = 4;
 pub(crate) const LOG_PORT: u8 = 5;
 pub(crate) const _LOCALIZATION_PORT: u8 = 6;
 pub(crate) const _GENERIC_SETPOINT_PORT: u8 = 7;
-pub(crate) const _PLATFORM_PORT: u8 = 13;
+pub(crate) const PLATFORM_PORT: u8 = 13;
 pub(crate) const _LINK_PORT: u8 = 15;
 
 /// # The Crazyflie
@@ -41,6 +42,8 @@ pub struct Crazyflie {
     pub commander: Commander,
     /// Console subsystem access
     pub console: Console,
+    /// Platform services
+    pub platform: Platform,
     pub(crate) _executor: Arc<dyn Executor>,
     uplink_task: Mutex<Option<JoinHandle<()>>>,
     dispatch_task: Mutex<Option<JoinHandle<()>>>,
@@ -109,33 +112,43 @@ impl Crazyflie {
                 }
             })
             .map_err(|e| Error::SystemError(format!("{:?}", e)))?;
-
-        // Create subsystems one by one
-        // The future is passed to join!() later down so that all modules initializes at the same time
-        // The get_port_receiver calls are guaranteed to work if the same port is not used twice (any way to express that at compile time?)
-        let log_downlink = dispatcher.get_port_receiver(5).unwrap();
-        let log = Log::new(log_downlink, uplink.clone());
-
-        let param_downlink = dispatcher.get_port_receiver(2).unwrap();
-        let param = Param::new(param_downlink, uplink.clone());
-
-        let commander = Commander::new(uplink.clone());
-
-         // Modules that can be initialized synchrnously
-         let console_downlink = dispatcher.get_port_receiver(0).unwrap();
-         let console = Console::new(executor.clone(), console_downlink).await?;
+        
+        // Downlink dispatch
+        let platform_downlink = dispatcher.get_port_receiver(PLATFORM_PORT).unwrap();
+        let log_downlink = dispatcher.get_port_receiver(LOG_PORT).unwrap();
+        let param_downlink = dispatcher.get_port_receiver(PARAM_PORT).unwrap();
+        let console_downlink = dispatcher.get_port_receiver(CONSOLE_PORT).unwrap();
 
         // Start the downlink packet dispatcher
         let dispatch_task = dispatcher.run().await?;
 
-        // Initialize all modules in parallel
-        let (log, param) = futures::join!(log, param);
+        // Start with the platform subsystem to get and test the Crazyflie's protocol version
+        let platform = Platform::new(uplink.clone(), platform_downlink);
+
+        let protocol_version = platform.protocol_version().await?;
+
+        if !(SUPPORTED_PROTOCOL_VERSION..=(SUPPORTED_PROTOCOL_VERSION+1)).contains(&protocol_version) {
+            return Err(Error::ProtocolVersionNotSupported);
+        }
+        
+        // Create subsystems one by one
+        // The future is passed to join!() later down so that all modules initializes at the same time
+        // The get_port_receiver calls are guaranteed to work if the same port is not used twice (any way to express that at compile time?)
+        let log_future = Log::new(log_downlink, uplink.clone());
+        let param_future = Param::new(param_downlink, uplink.clone());
+
+        let commander = Commander::new(uplink.clone());
+        let console = Console::new(executor.clone(), console_downlink).await?;
+
+        // Initialize async modules in parallel
+        let (log, param) = futures::join!(log_future, param_future);
 
         Ok(Crazyflie {
             log: log?,
             param: param?,
             commander,
             console,
+            platform,
             _executor: executor,
             uplink_task: Mutex::new(Some(uplink_task)),
             dispatch_task: Mutex::new(Some(dispatch_task)),
