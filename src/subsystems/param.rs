@@ -24,6 +24,8 @@ use std::{
     sync::Arc,
 };
 
+use crate::crazyflie::PARAM_PORT;
+
 #[derive(Debug)]
 struct ParamItemInfo {
     item_type: ValueType,
@@ -80,7 +82,6 @@ fn not_found(name: &str) -> Error {
     Error::ParamError(format!("Parameter {} not found", name))
 }
 
-const PARAM_PORT: u8 = 2;
 const READ_CHANNEL: u8 = 1;
 const _WRITE_CHANNEL: u8 = 2;
 const _MISC_CHANNEL: u8 = 3;

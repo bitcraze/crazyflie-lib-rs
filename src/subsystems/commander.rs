@@ -1,6 +1,6 @@
 //! # Low level setpoint subsystem
 //!
-//! This subsytem allows to send low-level setpoints. The setpoints are described as low-level in the sense that they
+//! This subsystem allows to send low-level setpoint. The setpoints are described as low-level in the sense that they
 //! are setting the instant target state. As such they likely need to be send very often to have the crazyflie
 //! follow the wanted flight profile.
 //!
@@ -35,8 +35,7 @@ use flume::Sender;
 
 use crate::{Error, Result};
 
-const RPYT_PORT: u8 = 3;
-const _GENERIC_PORT: u8 = 7;
+use crate::crazyflie::COMMANDER_PORT;
 
 const RPYT_CHANNEL: u8 = 0;
 
@@ -58,9 +57,9 @@ impl Commander {
     }
 }
 
-/// # Legay RPY+ setpoint
+/// # Legacy RPY+ setpoint
 ///
-/// This setpoint was originaly the only one present in the Crazyflie and has been (ab)used to
+/// This setpoint was originally the only one present in the Crazyflie and has been (ab)used to
 /// implement the early position control and other assisted and semi-autonomous mode.
 impl Commander {
     /// Set the Roll Pitch Yaw Thrust setpoint
@@ -85,7 +84,7 @@ impl Commander {
         payload.append(&mut yaw.to_le_bytes().to_vec());
         payload.append(&mut thrust.to_le_bytes().to_vec());
 
-        let pk = Packet::new(RPYT_PORT, RPYT_CHANNEL, payload);
+        let pk = Packet::new(COMMANDER_PORT, RPYT_CHANNEL, payload);
 
         self.uplink
             .send_async(pk)

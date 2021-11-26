@@ -42,6 +42,8 @@ use std::convert::TryInto;
 use std::sync::Weak;
 use std::{collections::BTreeMap, convert::TryFrom, sync::Arc, time::Duration};
 
+use crate::crazyflie::LOG_PORT;
+
 /// # Access to the Crazyflie Log Subsystem
 ///
 /// This struct provide functions to interact with the Crazyflie Log subsystem.
@@ -60,8 +62,6 @@ pub struct Log {
 fn not_found(name: &str) -> Error {
     Error::ParamError(format!("Log variable {} not found", name))
 }
-
-const LOG_PORT: u8 = 5;
 
 const CONTROL_CHANNEL: u8 = 1;
 

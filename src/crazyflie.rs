@@ -14,6 +14,17 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::time::Duration;
 
+// CRTP ports
+pub(crate) const CONSOLE_PORT: u8 = 0;
+pub(crate) const PARAM_PORT: u8 = 2;
+pub(crate) const COMMANDER_PORT: u8 = 3;
+pub(crate) const _MEMORY_PORT: u8 = 4;
+pub(crate) const LOG_PORT: u8 = 5;
+pub(crate) const _LOCALIZATION_PORT: u8 = 6;
+pub(crate) const _GENERIC_SETPOINT_PORT: u8 = 7;
+pub(crate) const _PLATFORM_PORT: u8 = 13;
+pub(crate) const _LINK_PORT: u8 = 15;
+
 /// # The Crazyflie
 ///
 /// This struct is one-time use: Creating it will connect to a Crazyflie and once disconnected, either as requested
