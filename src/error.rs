@@ -10,7 +10,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     /// Protocol version not supported, you need to update either the lib or the Crazyflie.
-    /// 
+    ///
     /// see [the crate documentation](crate#compatibility) for more information.
     ProtocolVersionNotSupported,
     /// Unexpected protocol error. The String contains the reason.

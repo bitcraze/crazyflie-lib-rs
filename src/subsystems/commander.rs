@@ -69,7 +69,7 @@ impl Commander {
     ///  - **Yaw** is in degree per seconds and represents the rotation rate
     ///  - **Thrust** is a 16 bit value where 0 maps to 0% thrust and 65535 to 100% thrust
     ///
-    /// The thrust is blocked by defaut. The setpoint needs to be set once with thrust = 0 to unlock
+    /// The thrust is blocked by default. The setpoint needs to be set once with thrust = 0 to unlock
     /// the thrust for example:
     /// ``` no_run
     /// # fn spin(cf: crazyflie_lib::Crazyflie) {

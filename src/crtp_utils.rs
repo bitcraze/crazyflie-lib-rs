@@ -74,7 +74,7 @@ impl CrtpDispatch {
                             }
                         }
                         Err(async_executors::TimeoutError) => continue,
-                        Ok(Err(_)) => return, // Other side of the channel disapeared, link closed
+                        Ok(Err(_)) => return, // Other side of the channel disappeared, link closed
                     }
                 }
             })

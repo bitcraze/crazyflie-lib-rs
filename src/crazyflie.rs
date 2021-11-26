@@ -4,9 +4,9 @@ use crate::subsystems::log::Log;
 use crate::subsystems::param::Param;
 
 use crate::crtp_utils::CrtpDispatch;
-use crate::{Executor, SUPPORTED_PROTOCOL_VERSION};
 use crate::subsystems::platform::Platform;
 use crate::{Error, Result};
+use crate::{Executor, SUPPORTED_PROTOCOL_VERSION};
 use async_executors::{JoinHandle, LocalSpawnHandleExt, TimerExt};
 use flume as channel;
 use futures::lock::Mutex;
@@ -112,7 +112,7 @@ impl Crazyflie {
                 }
             })
             .map_err(|e| Error::SystemError(format!("{:?}", e)))?;
-        
+
         // Downlink dispatch
         let platform_downlink = dispatcher.get_port_receiver(PLATFORM_PORT).unwrap();
         let log_downlink = dispatcher.get_port_receiver(LOG_PORT).unwrap();
@@ -127,10 +127,12 @@ impl Crazyflie {
 
         let protocol_version = platform.protocol_version().await?;
 
-        if !(SUPPORTED_PROTOCOL_VERSION..=(SUPPORTED_PROTOCOL_VERSION+1)).contains(&protocol_version) {
+        if !(SUPPORTED_PROTOCOL_VERSION..=(SUPPORTED_PROTOCOL_VERSION + 1))
+            .contains(&protocol_version)
+        {
             return Err(Error::ProtocolVersionNotSupported);
         }
-        
+
         // Create subsystems one by one
         // The future is passed to join!() later down so that all modules initializes at the same time
         // The get_port_receiver calls are guaranteed to work if the same port is not used twice (any way to express that at compile time?)
