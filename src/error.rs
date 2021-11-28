@@ -29,6 +29,8 @@ pub enum Error {
     VariableNotFound,
     /// Error with the async executors.
     SystemError(String),
+    /// App channel packets should be no larger than [APPCHANNEL_MTU](crate::subsystems::platform::APPCHANNEL_MTU)
+    AppchannelPacketTooLarge,
 }
 
 impl std::fmt::Display for Error {

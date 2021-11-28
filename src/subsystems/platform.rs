@@ -4,16 +4,19 @@
 //! and CRTP protocol, communication with apps using the App layer to setting the continuous wave radio mode for
 //! radio testing.
 
-use crate::{Error, Result};
+use std::convert::{TryFrom, TryInto};
+
+use crate::{Error, Result, crtp_utils::crtp_channel_dispatcher};
+use async_std::stream::IntoStream;
 use crazyflie_link::Packet;
 use flume::{Receiver, Sender};
-use futures::lock::Mutex;
+use futures::{Sink, SinkExt, Stream, StreamExt, lock::Mutex, stream};
 
 use crate::crazyflie::PLATFORM_PORT;
 
 const _PLATFORM_COMMAND: u8 = 0;
 const VERSION_CHANNEL: u8 = 1;
-const _APP_CHANNEL: u8 = 2;
+const APP_CHANNEL: u8 = 2;
 
 const _PLATFORM_SET_CONT_WAVE: u8 = 0;
 
@@ -21,17 +24,25 @@ const VERSION_GET_PROTOCOL: u8 = 0;
 const VERSION_GET_FIRMWARE: u8 = 1;
 const VERSION_GET_DEVICE_TYPE: u8 = 2;
 
+/// Maximum packet size that can be transmitted in an app channel packet.
+pub const APPCHANNEL_MTU: usize = 31;
+
 /// Access to platform services
 ///
 /// See the [platform module documentation](crate::subsystems::platform) for more context and information.
 pub struct Platform {
-    comm: Mutex<(Sender<Packet>, Receiver<Packet>)>,
+    version_comm: Mutex<(Sender<Packet>, Receiver<Packet>)>,
+    appchannel_comm: Mutex<Option<(Sender<Packet>, Receiver<Packet>)>>,
+    
 }
 /// Access to the platform services
 impl Platform {
     pub(crate) fn new(uplink: Sender<Packet>, downlink: Receiver<Packet>) -> Self {
+        let (_, version_downlink, appchannel_downlink, _) = crtp_channel_dispatcher(downlink);
+
         Self {
-            comm: Mutex::new((uplink, downlink)),
+            version_comm: Mutex::new((uplink.clone(), version_downlink)),
+            appchannel_comm: Mutex::new(Some((uplink.clone(), appchannel_downlink)))
         }
     }
 
@@ -43,7 +54,7 @@ impl Platform {
     ///
     /// Compatibility is checked at connection time.
     pub async fn protocol_version(&self) -> Result<u8> {
-        let (uplink, downlink) = &*self.comm.lock().await;
+        let (uplink, downlink) = &*self.version_comm.lock().await;
 
         let pk = Packet::new(PLATFORM_PORT, VERSION_CHANNEL, vec![VERSION_GET_PROTOCOL]);
         uplink.send_async(pk).await?;
@@ -63,7 +74,7 @@ impl Platform {
     /// If this firmware is a git build, between releases, the number of commit since the last release will be added
     /// for example ```2021.06 +128```.
     pub async fn firmware_version(&self) -> Result<String> {
-        let (uplink, downlink) = &*self.comm.lock().await;
+        let (uplink, downlink) = &*self.version_comm.lock().await;
 
         let pk = Packet::new(PLATFORM_PORT, VERSION_CHANNEL, vec![VERSION_GET_FIRMWARE]);
         uplink.send_async(pk).await?;
@@ -84,7 +95,7 @@ impl Platform {
     /// The Crazyflie firmware can run on multiple device. This function returns the name of the device. For example
     /// ```Crazyflie 2.1``` is returned in the case of a Crazyflie 2.1.
     pub async fn device_type_name(&self) -> Result<String> {
-        let (uplink, downlink) = &*self.comm.lock().await;
+        let (uplink, downlink) = &*self.version_comm.lock().await;
 
         let pk = Packet::new(
             PLATFORM_PORT,
@@ -103,4 +114,101 @@ impl Platform {
 
         Ok(version.to_string())
     }
+
+    /// Get sender and receiver to the app channel
+    /// 
+    /// This function returns the transmit and receive channel to and from
+    /// the app channel. The channel accepts and generates [AppChannelPacket]
+    /// which guarantees that the packet lenght is correct. the From trait is
+    /// implemented to all possible ```[u8; n]``` and TryFrom to Vec<u8> for
+    /// [AppChannelPacket].
+    pub async fn get_app_channel(&self) -> Option<(impl Sink<AppChannelPacket>, impl Stream<Item = AppChannelPacket>)> {
+        if let Some((tx, rx)) = self.appchannel_comm.lock().await.take() {
+            // let all_rx = ;
+
+            let app_tx = Box::pin(tx.into_sink().with_flat_map(|app_pk: AppChannelPacket| {
+                stream::once(async {Ok(Packet::new(PLATFORM_PORT, APP_CHANNEL, app_pk.0))} )
+            }));
+
+            let app_rx = rx.into_stream().map(|pk: Packet| {
+                AppChannelPacket(pk.get_data().to_vec())
+            }).boxed();
+
+            Some((app_tx, app_rx))
+        } else {
+            None
+        }
+    }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AppChannelPacket(Vec<u8>);
+
+impl TryFrom<Vec<u8>> for AppChannelPacket {
+    type Error = Error;
+
+    fn try_from(value: Vec<u8>) -> Result<Self> {
+        if value.len() <= APPCHANNEL_MTU {
+            Ok(AppChannelPacket(value))
+        } else {
+            Err(Error::AppchannelPacketTooLarge)
+        }
+    }
+}
+
+impl TryFrom<&[u8]> for AppChannelPacket {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self> {
+        if value.len() <= APPCHANNEL_MTU {
+            Ok(AppChannelPacket(value.to_vec()))
+        } else {
+            Err(Error::AppchannelPacketTooLarge)
+        }
+    }
+}
+
+// Implement useful From<> for fixed size array
+// This would be much better as a contrained const generic but
+// it does not seems to be possible for the moment
+macro_rules! from_impl {
+    ($n:expr) => {
+        impl From<[u8;$n]> for AppChannelPacket {
+            fn from(v: [u8;$n]) -> Self {
+                AppChannelPacket(v.to_vec())
+            }
+        }
+    };
+}
+
+from_impl!(0);
+from_impl!(1);
+from_impl!(2);
+from_impl!(3);
+from_impl!(4);
+from_impl!(5);
+from_impl!(6);
+from_impl!(7);
+from_impl!(8);
+from_impl!(9);
+from_impl!(10);
+from_impl!(11);
+from_impl!(12);
+from_impl!(13);
+from_impl!(14);
+from_impl!(15);
+from_impl!(16);
+from_impl!(17);
+from_impl!(18);
+from_impl!(19);
+from_impl!(20);
+from_impl!(21);
+from_impl!(22);
+from_impl!(23);
+from_impl!(24);
+from_impl!(25);
+from_impl!(26);
+from_impl!(27);
+from_impl!(28);
+from_impl!(29);
+from_impl!(30);
