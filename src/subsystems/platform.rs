@@ -4,10 +4,9 @@
 //! and CRTP protocol, communication with apps using the App layer to setting the continuous wave radio mode for
 //! radio testing.
 
-use std::convert::{TryFrom, TryInto};
+use std::convert::{TryFrom};
 
 use crate::{Error, Result, crtp_utils::crtp_channel_dispatcher};
-use async_std::stream::IntoStream;
 use crazyflie_link::Packet;
 use flume::{Receiver, Sender};
 use futures::{Sink, SinkExt, Stream, StreamExt, lock::Mutex, stream};
@@ -42,7 +41,7 @@ impl Platform {
 
         Self {
             version_comm: Mutex::new((uplink.clone(), version_downlink)),
-            appchannel_comm: Mutex::new(Some((uplink.clone(), appchannel_downlink)))
+            appchannel_comm: Mutex::new(Some((uplink, appchannel_downlink)))
         }
     }
 
@@ -119,7 +118,7 @@ impl Platform {
     /// 
     /// This function returns the transmit and receive channel to and from
     /// the app channel. The channel accepts and generates [AppChannelPacket]
-    /// which guarantees that the packet lenght is correct. the From trait is
+    /// which guarantees that the packet length is correct. the From trait is
     /// implemented to all possible ```[u8; n]``` and TryFrom to Vec<u8> for
     /// [AppChannelPacket].
     pub async fn get_app_channel(&self) -> Option<(impl Sink<AppChannelPacket>, impl Stream<Item = AppChannelPacket>)> {
@@ -141,6 +140,37 @@ impl Platform {
     }
 }
 
+/// # App channel packet
+/// 
+/// This object wraps a Vec<u8> but can only be created for byte array of length
+/// <= [APPCHANNEL_MTU].
+/// 
+/// The [TryFrom] trait is implemented for ```Vec<u8>``` and ```&[u8]```. The
+/// From trait is implemented for fixed size array with compatible length. These
+/// traits are teh expected way to build a packet:
+/// 
+/// ```
+/// # use std::convert::TryInto;
+/// # use crazyflie_lib::subsystems::platform::AppChannelPacket;
+/// let a: AppChannelPacket = [1,2,3].into();
+/// let b: AppChannelPacket = vec![1,2,3].try_into().unwrap();
+/// ```
+/// 
+/// And it protects agains building bad packets:
+/// ``` should_panic
+/// # use std::convert::TryInto;
+/// # use crazyflie_lib::subsystems::platform::AppChannelPacket;
+/// // This will panic!
+/// let bad: AppChannelPacket = vec![0; 64].try_into().unwrap();
+/// ```
+/// 
+/// The traits also allows to go the other way:
+/// ```
+/// # use crazyflie_lib::subsystems::platform::AppChannelPacket;
+/// let pk: AppChannelPacket = [1,2,3].into();
+/// let data: Vec<u8> = pk.into();
+/// assert_eq!(data, vec![1,2,3]);
+/// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct AppChannelPacket(Vec<u8>);
 
@@ -168,9 +198,15 @@ impl TryFrom<&[u8]> for AppChannelPacket {
     }
 }
 
+impl From<AppChannelPacket> for Vec<u8> {
+    fn from(pk: AppChannelPacket) -> Self {
+        pk.0
+    }
+}
+
 // Implement useful From<> for fixed size array
 // This would be much better as a contrained const generic but
-// it does not seems to be possible for the moment
+// it does not seems to be possible at the moment
 macro_rules! from_impl {
     ($n:expr) => {
         impl From<[u8;$n]> for AppChannelPacket {
