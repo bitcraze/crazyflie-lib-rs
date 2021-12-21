@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // 0+0 = 0
         let _ = tx.send([0; 12].into()).await;
-        assert_eq!(rx.next().await, Some([0;4].into()));
+        assert_eq!(rx.next().await, Some([0; 4].into()));
         println!("0+0+0 = 0");
 
         // 1+2+3 = 6
@@ -43,9 +43,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pk.append(&mut b.to_le_bytes().to_vec());
         pk.append(&mut c.to_le_bytes().to_vec());
         let _ = tx.send(pk.try_into().unwrap()).await;
-        assert_eq!(rx.next().await, Some((a+b+c).to_le_bytes().into()));
-        println!("{}+{}+{} = {}", a, b, c, a+b+c);
-
+        assert_eq!(rx.next().await, Some((a + b + c).to_le_bytes().into()));
+        println!("{}+{}+{} = {}", a, b, c, a + b + c);
     } else {
         println!("Could not find any Crazyflie to connect!");
     }

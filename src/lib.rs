@@ -19,7 +19,7 @@
 //! | Log | Full (V2) |
 //! | Memory | None |
 //! | Param | Full(V2) |
-//! | Platform | None |
+//! | Platform | Full |
 //!
 //! ## Compatibility
 //!

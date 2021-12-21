@@ -4,20 +4,20 @@
 //! and CRTP protocol, communication with apps using the App layer to setting the continuous wave radio mode for
 //! radio testing.
 
-use std::convert::{TryFrom};
+use std::convert::TryFrom;
 
-use crate::{Error, Result, crtp_utils::crtp_channel_dispatcher};
+use crate::{crtp_utils::crtp_channel_dispatcher, Error, Result};
 use crazyflie_link::Packet;
 use flume::{Receiver, Sender};
-use futures::{Sink, SinkExt, Stream, StreamExt, lock::Mutex, stream};
+use futures::{lock::Mutex, stream, Sink, SinkExt, Stream, StreamExt};
 
 use crate::crazyflie::PLATFORM_PORT;
 
-const _PLATFORM_COMMAND: u8 = 0;
+const PLATFORM_COMMAND: u8 = 0;
 const VERSION_CHANNEL: u8 = 1;
 const APP_CHANNEL: u8 = 2;
 
-const _PLATFORM_SET_CONT_WAVE: u8 = 0;
+const PLATFORM_SET_CONT_WAVE: u8 = 0;
 
 const VERSION_GET_PROTOCOL: u8 = 0;
 const VERSION_GET_FIRMWARE: u8 = 1;
@@ -32,7 +32,7 @@ pub const APPCHANNEL_MTU: usize = 31;
 pub struct Platform {
     version_comm: Mutex<(Sender<Packet>, Receiver<Packet>)>,
     appchannel_comm: Mutex<Option<(Sender<Packet>, Receiver<Packet>)>>,
-    
+    uplink: Sender<Packet>,
 }
 /// Access to the platform services
 impl Platform {
@@ -41,7 +41,8 @@ impl Platform {
 
         Self {
             version_comm: Mutex::new((uplink.clone(), version_downlink)),
-            appchannel_comm: Mutex::new(Some((uplink, appchannel_downlink)))
+            appchannel_comm: Mutex::new(Some((uplink.clone(), appchannel_downlink))),
+            uplink,
         }
     }
 
@@ -115,47 +116,80 @@ impl Platform {
     }
 
     /// Get sender and receiver to the app channel
-    /// 
+    ///
     /// This function returns the transmit and receive channel to and from
     /// the app channel. The channel accepts and generates [AppChannelPacket]
     /// which guarantees that the packet length is correct. the From trait is
     /// implemented to all possible ```[u8; n]``` and TryFrom to Vec<u8> for
     /// [AppChannelPacket].
-    pub async fn get_app_channel(&self) -> Option<(impl Sink<AppChannelPacket>, impl Stream<Item = AppChannelPacket>)> {
+    pub async fn get_app_channel(
+        &self,
+    ) -> Option<(
+        impl Sink<AppChannelPacket>,
+        impl Stream<Item = AppChannelPacket>,
+    )> {
         if let Some((tx, rx)) = self.appchannel_comm.lock().await.take() {
             // let all_rx = ;
 
             let app_tx = Box::pin(tx.into_sink().with_flat_map(|app_pk: AppChannelPacket| {
-                stream::once(async {Ok(Packet::new(PLATFORM_PORT, APP_CHANNEL, app_pk.0))} )
+                stream::once(async { Ok(Packet::new(PLATFORM_PORT, APP_CHANNEL, app_pk.0)) })
             }));
 
-            let app_rx = rx.into_stream().map(|pk: Packet| {
-                AppChannelPacket(pk.get_data().to_vec())
-            }).boxed();
+            let app_rx = rx
+                .into_stream()
+                .map(|pk: Packet| AppChannelPacket(pk.get_data().to_vec()))
+                .boxed();
 
             Some((app_tx, app_rx))
         } else {
             None
         }
     }
+
+    /// Set radio in continious wave mode
+    ///
+    /// If activate is set to true, the Crazyflie's radio will transmit a continious wave at the current channel
+    /// frequency. This will be active until the Crazyflie is reset or this function is called with activate to false.
+    ///
+    /// ## Unsafety
+    ///
+    /// This function is not unsafe in the Rust traditional way: it is memory safe, it justs sends a packet to the
+    /// Crazyflie without calling any unsafe function. However it should be used very carefully.
+    ///
+    /// Setting continious wave will:
+    ///  - Disconnect the radio link. So this function should practically only be used when connected over USB
+    ///  - Jam any radio running on the same frequency, this includes Wifi and Bluetooth
+    ///
+    /// As such, this shall only be used for test purpose in a controlled environment.
+    pub async unsafe fn set_cont_wave(&self, activate: bool) -> Result<()> {
+        let command = if activate { 1 } else { 0 };
+        self.uplink
+            .send_async(Packet::new(
+                PLATFORM_PORT,
+                PLATFORM_COMMAND,
+                vec![PLATFORM_SET_CONT_WAVE, command],
+            ))
+            .await?;
+        Ok(())
+    }
 }
 
 /// # App channel packet
-/// 
+///
 /// This object wraps a Vec<u8> but can only be created for byte array of length
 /// <= [APPCHANNEL_MTU].
-/// 
+///
 /// The [TryFrom] trait is implemented for ```Vec<u8>``` and ```&[u8]```. The
 /// From trait is implemented for fixed size array with compatible length. These
 /// traits are teh expected way to build a packet:
-/// 
+///
 /// ```
 /// # use std::convert::TryInto;
 /// # use crazyflie_lib::subsystems::platform::AppChannelPacket;
 /// let a: AppChannelPacket = [1,2,3].into();
 /// let b: AppChannelPacket = vec![1,2,3].try_into().unwrap();
 /// ```
-/// 
+///
 /// And it protects agains building bad packets:
 /// ``` should_panic
 /// # use std::convert::TryInto;
@@ -163,7 +197,7 @@ impl Platform {
 /// // This will panic!
 /// let bad: AppChannelPacket = vec![0; 64].try_into().unwrap();
 /// ```
-/// 
+///
 /// The traits also allows to go the other way:
 /// ```
 /// # use crazyflie_lib::subsystems::platform::AppChannelPacket;
@@ -209,8 +243,8 @@ impl From<AppChannelPacket> for Vec<u8> {
 // it does not seems to be possible at the moment
 macro_rules! from_impl {
     ($n:expr) => {
-        impl From<[u8;$n]> for AppChannelPacket {
-            fn from(v: [u8;$n]) -> Self {
+        impl From<[u8; $n]> for AppChannelPacket {
+            fn from(v: [u8; $n]) -> Self {
                 AppChannelPacket(v.to_vec())
             }
         }
