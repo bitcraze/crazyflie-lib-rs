@@ -106,4 +106,4 @@ impl<U> Executor for U where U: LocalSpawnHandle<()> + Timer + 'static {}
 /// Supported protocol version
 ///
 /// see [the crate documentation](crate#compatibility) for more information.
-pub const SUPPORTED_PROTOCOL_VERSION: u8 = 4;
+pub const SUPPORTED_PROTOCOL_VERSION: u8 = 7;
