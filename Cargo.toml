@@ -5,7 +5,7 @@ authors = ["Arnaud Taffanel <arnaud@bitcraze.io>"]
 edition = "2018"
 description = "Crazyflie quadcopter control lib"
 readme = "README.md"
-repository = "https://github.com/ataffanel/crazyflie-lib-rs"
+repository = "https://github.com/bitcraze/crazyflie-lib-rs"
 license = "MIT OR Apache-2.0"
 keywords = ["crazyflie", "quadcopter", "drone"]
 categories = ["hardware-support"]
@@ -14,7 +14,7 @@ exclude = [
 ]
 
 [dependencies]
-crazyflie-link = { version="0.2.1", default-features = false }
+crazyflie-link = { version="0.2.2", default-features = false }
 async_executors = { version="0.4.2", features=["timer"] }
 futures-util = "0.3"
 futures = "0.3"
