@@ -1,13 +1,12 @@
 /// Simple example that ramps the motor thrust and then stops them
 use crazyflie_lib::Crazyflie;
 use crazyflie_link::LinkContext;
-use std::time::Duration;
+use tokio::time::{Duration, sleep};
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let context = LinkContext::new(async_executors::AsyncStd);
+    let context = LinkContext::new();
     let crazyflie = Crazyflie::connect_from_uri(
-        async_executors::AsyncStd,
         &context,
         "radio://0/80/2M/E7E7E7E7E7",
     )
@@ -26,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .setpoint_rpyt(0.0, 0.0, 0.0, thrust)
             .await?;
 
-        async_std::task::sleep(runtime / (steps as u32)).await;
+        sleep(runtime / (steps as u32)).await;
     }
 
     Ok(())

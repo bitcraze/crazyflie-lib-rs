@@ -6,10 +6,10 @@ use crate::subsystems::param::Param;
 use crate::crtp_utils::CrtpDispatch;
 use crate::subsystems::platform::Platform;
 use crate::{Error, Result};
-use crate::{Executor, SUPPORTED_PROTOCOL_VERSION};
-use async_executors::{JoinHandle, LocalSpawnHandleExt, TimerExt};
+use crate::SUPPORTED_PROTOCOL_VERSION;
 use flume as channel;
 use futures::lock::Mutex;
+use tokio::task::JoinHandle;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
@@ -44,7 +44,6 @@ pub struct Crazyflie {
     pub console: Console,
     /// Platform services
     pub platform: Platform,
-    pub(crate) _executor: Arc<dyn Executor>,
     uplink_task: Mutex<Option<JoinHandle<()>>>,
     dispatch_task: Mutex<Option<JoinHandle<()>>>,
     disconnect: Arc<AtomicBool>,
@@ -61,13 +60,12 @@ impl Crazyflie {
     ///
     /// An error is returned either if the link cannot be opened or if the Crazyflie connection fails.
     pub async fn connect_from_uri(
-        executor: impl Executor,
         link_context: &crazyflie_link::LinkContext,
         uri: &str,
     ) -> Result<Self> {
         let link = link_context.open_link(uri).await?;
 
-        Self::connect_from_link(executor, link).await
+        Self::connect_from_link(link).await
     }
 
     /// Connect a Crazyflie using an existing link
@@ -79,39 +77,34 @@ impl Crazyflie {
     ///
     /// This function will return an error if anything goes wrong in the connection process.
     pub async fn connect_from_link(
-        executor: impl Executor,
         link: crazyflie_link::Connection,
     ) -> Result<Self> {
         let disconnect = Arc::new(AtomicBool::new(false));
-        let executor = Arc::new(executor);
 
         // Downlink dispatcher
         let link = Arc::new(link);
-        let mut dispatcher = CrtpDispatch::new(executor.clone(), link.clone(), disconnect.clone());
+        let mut dispatcher = CrtpDispatch::new(link.clone(), disconnect.clone());
 
         // Uplink queue
         let disconnect_uplink = disconnect.clone();
         let (uplink, rx) = channel::unbounded();
-        let executor_uplink = executor.clone();
         let link_uplink = link.clone();
-        let uplink_task = executor
-            .spawn_handle_local(async move {
+        let uplink_task = tokio::spawn(async move {
                 while !disconnect_uplink.load(Relaxed) {
-                    match executor_uplink
-                        .timeout(Duration::from_millis(100), rx.recv_async())
-                        .await
+                    match tokio::time::timeout(
+                          Duration::from_millis(100), rx.recv_async()
+                        ).await
                     {
                         Ok(Ok(pk)) => {
                             if link_uplink.send_packet(pk).await.is_err() {
                                 return;
                             }
                         }
-                        Err(async_executors::TimeoutError) => (),
+                        Err(_) => (),
                         Ok(Err(flume::RecvError::Disconnected)) => return,
                     }
                 }
-            })
-            .map_err(|e| Error::SystemError(format!("{:?}", e)))?;
+            });
 
         // Downlink dispatch
         let platform_downlink = dispatcher.get_port_receiver(PLATFORM_PORT).unwrap();
@@ -140,7 +133,7 @@ impl Crazyflie {
         let param_future = Param::new(param_downlink, uplink.clone());
 
         let commander = Commander::new(uplink.clone());
-        let console = Console::new(executor.clone(), console_downlink).await?;
+        let console = Console::new(console_downlink).await?;
 
         // Initialize async modules in parallel
         let (log, param) = futures::join!(log_future, param_future);
@@ -151,7 +144,6 @@ impl Crazyflie {
             commander,
             console,
             platform,
-            _executor: executor,
             uplink_task: Mutex::new(Some(uplink_task)),
             dispatch_task: Mutex::new(Some(dispatch_task)),
             disconnect,
@@ -172,10 +164,10 @@ impl Crazyflie {
 
         // Wait for both task to finish
         if let Some(uplink_task) = self.uplink_task.lock().await.take() {
-            uplink_task.await;
+            uplink_task.await.expect("Uplink task failed");
         }
         if let Some(dispatch_task) = self.dispatch_task.lock().await.take() {
-            dispatch_task.await;
+            dispatch_task.await.expect("Dispatcher task failed");
         }
 
         self.link.close().await;

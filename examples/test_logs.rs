@@ -1,12 +1,12 @@
 use crazyflie_lib::{subsystems::log::LogPeriod, Crazyflie};
 use crazyflie_link::LinkContext;
-use std::{convert::TryInto, time::Duration};
+use std::convert::TryInto;
+use tokio::time::{Duration, sleep};
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let context = LinkContext::new(async_executors::AsyncStd);
+    let context = LinkContext::new();
     let cf = Crazyflie::connect_from_uri(
-        async_executors::AsyncStd,
         &context,
         "radio://0/80/2M/E7E7E7E7E7",
     )
@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let block = stream.stop().await?;
 
     println!(" --- Pausing log for 3 seconds --- ");
-    async_std::task::sleep(Duration::from_secs(3)).await;
+    sleep(Duration::from_secs(3)).await;
 
     let stream = block.start(LogPeriod::from_millis(10)?).await?;
 

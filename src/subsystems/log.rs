@@ -10,8 +10,8 @@
 //! # use crazyflie_lib::{Crazyflie, Value, Error, subsystems::log::LogPeriod};
 //! # use crazyflie_link::LinkContext;
 //! # async fn example() -> Result<(), Error> {
-//! # let context = LinkContext::new(async_executors::AsyncStd);
-//! # let cf = Crazyflie::connect_from_uri(async_executors::AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
+//! # let context = LinkContext::new();
+//! # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await?;
 //! // Create the log block
 //! let mut block = cf.log.create_block().await?;
 //!
@@ -124,7 +124,7 @@ impl Log {
 
     async fn spawn_data_dispatcher(&self, data_downlink: flume::Receiver<Packet>) {
         let data_channels = self.data_channels.clone();
-        crate::spawn(async move {
+        tokio::spawn(async move {
             while let Ok(packet) = data_downlink.recv_async().await {
                 if packet.get_data().len() > 1 {
                     let block_id = packet.get_data()[0];
