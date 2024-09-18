@@ -14,7 +14,7 @@ exclude = [
 ]
 
 [dependencies]
-crazyflie-link = { git = "https://github.com/bitcraze/crazyflie-link-rs.git", branch = "evoggy/tokio-as-feature" }
+crazyflie-link = { git = "https://github.com/bitcraze/crazyflie-link-rs.git" }
 futures-util = "0.3"
 futures = "0.3"
 async-stream = "0.3.1"
@@ -23,14 +23,7 @@ async-trait = "0.1.50"
 num_enum = "0.5.1"
 half = "1.7.1"
 async-broadcast = "0.3.4"
-tokio = { version = "1.36.0", features = ["full"], optional = true }
-
-wasm-bindgen-futures = { version = "0.4.24", optional = true }
+tokio = { version = "1.36.0", features = ["full"] }
 
 [dev-dependencies]
 env_logger = "0.9.0"
-
-[features]
-default = ["tokio", "crazyflie-link/native"]
-tokio = ["dep:tokio"]
-web = ["wasm-bindgen-futures", "crazyflie-link/webusb"]

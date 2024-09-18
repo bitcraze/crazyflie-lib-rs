@@ -84,13 +84,6 @@ pub use crate::crazyflie::Crazyflie;
 pub use crate::error::{Error, Result};
 pub use crate::value::{Value, ValueType};
 
-#[cfg(feature = "wasm-bindgen-futures")]
-use wasm_bindgen_futures::spawn_local as spawn;
-
-// Check if the feature tokio is set
-#[cfg(not(feature = "tokio"))]
-compile_error!("feature \"tokio\" must be enabled at this time");
-
 /// Supported protocol version
 ///
 /// see [the crate documentation](crate#compatibility) for more information.
