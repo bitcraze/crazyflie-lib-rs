@@ -13,7 +13,7 @@
 //!
 //! The following example code would drive the motors in a ramp and then stop:
 //! ``` no_run
-//! # use std::time::Duration;
+//! # use tokio::time::{sleep, Duration};
 //! # async fn ramp(crazyflie: crazyflie_lib::Crazyflie) -> Result<(), Box<dyn std::error::Error>> {
 //! // Unlock the commander
 //! crazyflie.commander.setpoint_rpyt(0.0, 0.0, 0.0, 0).await?;
@@ -21,7 +21,7 @@
 //! // Ramp!
 //! for thrust in (0..20_000).step_by(1_000) {
 //!     crazyflie.commander.setpoint_rpyt(0.0, 0.0, 0.0, thrust).await?;
-//!     async_std::task::sleep(Duration::from_millis(100)).await;
+//!     sleep(Duration::from_millis(100)).await;
 //! }
 //!
 //! // Stop the motors

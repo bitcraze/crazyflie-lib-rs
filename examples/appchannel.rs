@@ -17,9 +17,9 @@ use futures::{SinkExt, StreamExt};
 //
 // Like most of the other examples, it scans for Crazyflies and connect the fist one
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let link_context = crazyflie_link::LinkContext::new(async_executors::AsyncStd);
+    let link_context = crazyflie_link::LinkContext::new();
 
     // Scan for Crazyflies on the default address
     println!("Scanning for Crazyflie.");
@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(uri) = found.first() {
         println!("Connecting to {}", &uri);
-        let cf = Crazyflie::connect_from_uri(async_executors::AsyncStd, &link_context, uri).await?;
+        let cf = Crazyflie::connect_from_uri(&link_context, uri).await?;
 
         let (mut tx, mut rx) = cf.platform.get_app_channel().await.unwrap();
 

@@ -3,15 +3,12 @@
 //! These functionalities are currently all private, some might be useful for the user code as well, lets make them
 //! public when needed.
 
-use crate::spawn;
-use crate::{Error, Executor, Result};
-use async_executors::JoinHandle;
-use async_executors::LocalSpawnHandleExt;
-use async_executors::TimerExt;
+use crate::{Error, Result};
 use async_trait::async_trait;
 use crazyflie_link::Packet;
 use flume as channel;
 use flume::{Receiver, Sender};
+use tokio::task::JoinHandle;
 use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
@@ -25,21 +22,18 @@ pub struct CrtpDispatch {
     link: Arc<crazyflie_link::Connection>,
     // port_callbacks: [Arc<Mutex<Option<Sender<Packet>>>>; 15]
     port_channels: BTreeMap<u8, Sender<Packet>>,
-    disconnect: Arc<AtomicBool>,
-    executor: Arc<dyn Executor>,
+    disconnect: Arc<AtomicBool>
 }
 
 impl CrtpDispatch {
     pub fn new(
-        executor: impl Executor,
         link: Arc<crazyflie_link::Connection>,
         disconnect: Arc<AtomicBool>,
     ) -> Self {
         CrtpDispatch {
             link,
             port_channels: BTreeMap::new(),
-            disconnect,
-            executor: Arc::new(executor),
+            disconnect
         }
     }
 
@@ -56,13 +50,9 @@ impl CrtpDispatch {
 
     pub async fn run(self) -> Result<JoinHandle<()>> {
         let link = self.link.clone();
-        let executor = self.executor.clone();
-        executor
-            .spawn_handle_local(async move {
-                while !self.disconnect.load(Relaxed) {
-                    match self
-                        .executor
-                        .timeout(Duration::from_millis(200), link.recv_packet())
+        Ok(tokio::spawn(async move {
+                while !self.disconnect.load(Relaxed) {                  
+                    match tokio::time::timeout(Duration::from_millis(200), link.recv_packet())
                         .await
                     {
                         Ok(Ok(packet)) => {
@@ -73,12 +63,12 @@ impl CrtpDispatch {
                                 }
                             }
                         }
-                        Err(async_executors::TimeoutError) => continue,
+                        Err(_) => continue,
                         Ok(Err(_)) => return, // Other side of the channel disappeared, link closed
                     }
                 }
             })
-            .map_err(|e| Error::SystemError(format!("{:?}", e)))
+          )
     }
 }
 
@@ -172,7 +162,7 @@ pub fn crtp_channel_dispatcher(
         receivers.insert(0, rx);
     }
 
-    spawn(async move {
+    tokio::spawn(async move {
         while let Ok(pk) = downlink.recv_async().await {
             if pk.get_channel() < 4 {
                 let _ = senders[pk.get_channel() as usize].send_async(pk).await;

@@ -147,7 +147,7 @@ impl Param {
         let values = self.values.clone();
         let toc = self.toc.clone();
 
-        crate::spawn(async move {
+        tokio::spawn(async move {
             while let Ok(pk) = misc_downlink.recv_async().await {
                 if pk.get_data()[0] != 1 {
                     continue;
@@ -216,8 +216,8 @@ impl Param {
     /// # use crazyflie_lib::{Crazyflie, Value, Error};
     /// # use crazyflie_link::LinkContext;
     /// # async fn example() -> Result<(), Error> {
-    /// # let context = LinkContext::new(async_executors::AsyncStd);
-    /// # let cf = Crazyflie::connect_from_uri(async_executors::AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
+    /// # let context = LinkContext::new();
+    /// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await?;
     /// cf.param.set("example.param", 42u16).await?;  // From primitive
     /// cf.param.set("example.param", Value::U16(42)).await?;  // From Value
     /// # Ok(())
@@ -274,8 +274,8 @@ impl Param {
     /// # use crazyflie_lib::{Crazyflie, Value, Error};
     /// # use crazyflie_link::LinkContext;
     /// # async fn example() -> Result<(), Error> {
-    /// # let context = LinkContext::new(async_executors::AsyncStd);
-    /// # let cf = Crazyflie::connect_from_uri(async_executors::AsyncStd, &context, "radio://0/60/2M/E7E7E7E7E7").await?;
+    /// # let context = LinkContext::new();
+    /// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await?;
     /// let example: u16 = cf.param.get("example.param").await?;  // To primitive
     /// dbg!(example);  // 42
     /// let example: Value = cf.param.get("example.param").await?;  // To Value

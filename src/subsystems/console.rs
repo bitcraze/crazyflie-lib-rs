@@ -57,7 +57,7 @@ use std::sync::Arc;
 
 use crate::Result;
 use async_broadcast::{broadcast, Receiver};
-use async_executors::{JoinHandle, LocalSpawnHandleExt};
+use tokio::task::JoinHandle;
 use crazyflie_link::Packet;
 use flume as channel;
 use futures::{lock::Mutex, Stream, StreamExt};
@@ -75,7 +75,6 @@ pub struct Console {
 
 impl Console {
     pub(crate) async fn new(
-        executor: impl crate::Executor,
         downlink: channel::Receiver<Packet>,
     ) -> Result<Self> {
         let (stream_broadcast, stream_broadcast_receiver) = broadcast(1000);
@@ -87,7 +86,7 @@ impl Console {
         let buffer = console_buffer.clone();
         let lines = console_lines.clone();
 
-        let _console_task = executor.spawn_handle_local(async move {
+        let _console_task = tokio::spawn(async move {
             let mut line_buffer = String::new();
             while let Ok(pk) = downlink.recv_async().await {
                 // Decode text from the console
@@ -106,7 +105,7 @@ impl Console {
                     let _ = line_broadcast.broadcast(line.to_owned()).await;
                 }
             }
-        })?;
+        });
 
         Ok(Self {
             stream_broadcast_receiver,

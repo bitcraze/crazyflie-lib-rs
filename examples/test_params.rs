@@ -2,11 +2,10 @@ use crazyflie_lib::Crazyflie;
 use crazyflie_link::LinkContext;
 use futures::StreamExt;
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let context = LinkContext::new(async_executors::AsyncStd);
+    let context = LinkContext::new();
     let crazyflie = Crazyflie::connect_from_uri(
-        async_executors::AsyncStd,
         &context,
         "radio://0/60/2M/E7E7E7E7E7",
     )
@@ -14,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Launch a task to watch param changes
     let mut param_watcher = crazyflie.param.watch_change().await;
-    async_std::task::spawn(async move {
+    tokio::spawn(async move {
         while let Some((name, value)) = param_watcher.next().await {
             println!(
                 " > Param watcher: '{}' updated with value {:?}",
