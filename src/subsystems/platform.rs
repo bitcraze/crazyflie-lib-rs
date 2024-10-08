@@ -151,17 +151,12 @@ impl Platform {
     /// If activate is set to true, the Crazyflie's radio will transmit a continious wave at the current channel
     /// frequency. This will be active until the Crazyflie is reset or this function is called with activate to false.
     ///
-    /// ## Unsafety
-    ///
-    /// This function is not unsafe in the Rust traditional way: it is memory safe, it justs sends a packet to the
-    /// Crazyflie without calling any unsafe function. However it should be used very carefully.
-    ///
     /// Setting continious wave will:
     ///  - Disconnect the radio link. So this function should practically only be used when connected over USB
     ///  - Jam any radio running on the same frequency, this includes Wifi and Bluetooth
     ///
     /// As such, this shall only be used for test purpose in a controlled environment.
-    pub async unsafe fn set_cont_wave(&self, activate: bool) -> Result<()> {
+    pub async fn set_cont_wave(&self, activate: bool) -> Result<()> {
         let command = if activate { 1 } else { 0 };
         self.uplink
             .send_async(Packet::new(
