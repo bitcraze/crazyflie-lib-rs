@@ -11,7 +11,7 @@ The following subsystems are or need to be implemented:
  - [ ] App channel
  - [ ] Commander
    - [x] Basic Roll Pitch Yaw setpoint
-   - [ ] Generic setpoints
+   - [x] Generic setpoints
  - [x] Console
  - [ ] High-level commander
  - [ ] Localization
