@@ -87,4 +87,4 @@ pub use crate::value::{Value, ValueType};
 /// Supported protocol version
 ///
 /// see [the crate documentation](crate#compatibility) for more information.
-pub const SUPPORTED_PROTOCOL_VERSION: u8 = 7;
+pub const SUPPORTED_PROTOCOL_VERSION: u8 = 10;
