@@ -23,11 +23,7 @@
 //!
 //! ## Compatibility
 //!
-//! This crate is compatible with Crazyflie protocol version > 4. This means Crazyflie firmware release >= 2018.08.
-//!
-//! The Crazyflie guarantees backward functionalities for one protocol version
-//! so this lib will be compatible with version 4 (~2018-08) and 5 (future) of
-//! the protocol.
+//! This crate is compatible with Crazyflie protocol version >= [`SUPPORTED_PROTOCOL_VERSION`].
 //!
 //! ## Usage
 //!
