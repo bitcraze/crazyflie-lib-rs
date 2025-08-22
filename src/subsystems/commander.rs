@@ -38,10 +38,20 @@ use crate::{Error, Result};
 use crate::crazyflie::COMMANDER_PORT;
 use crate::crazyflie::_GENERIC_SETPOINT_PORT;
 
-const RPYT_CHANNEL: u8 = 0;
 
+// Channels
+const RPYT_CHANNEL: u8 = 0;
 const _GENERIC_SETPOINT_CHANNEL: u8 = 0;
 const _GENERIC_CMD_CHANNEL: u8 = 1;
+
+// Setpoint type identifiers
+const TYPE_POSITION: u8 = 7;
+const TYPE_VELOCITY_WORLD: u8 = 8;
+const TYPE_ZDISTANCE: u8 = 9;
+const TYPE_HOVER: u8 = 10;
+const TYPE_MANUAL: u8 = 11;
+const TYPE_STOP: u8 = 0;
+const TYPE_META_COMMAND_NOTIFY_SETPOINT_STOP: u8 = 0;
 
 /// # Low level setpoint subsystem
 ///
@@ -113,7 +123,7 @@ impl Commander {
     /// * `yaw` - Target yaw angle (degrees, absolute)
     pub async fn setpoint_position(&self, x: f32, y: f32, z: f32, yaw: f32) -> Result<()> {
         let mut payload = Vec::with_capacity(1 + 4 * 4);
-        payload.push(7); // TYPE_POSITION
+        payload.push(TYPE_POSITION);
         payload.extend_from_slice(&x.to_le_bytes());
         payload.extend_from_slice(&y.to_le_bytes());
         payload.extend_from_slice(&z.to_le_bytes());
@@ -132,7 +142,7 @@ impl Commander {
     /// * `yawrate` - Target yaw rate (degrees/second)
     pub async fn setpoint_velocity_world(&self, vx: f32, vy: f32, vz: f32, yawrate: f32) -> Result<()> {
         let mut payload = Vec::with_capacity(1 + 4 * 4);
-        payload.push(8); // TYPE_VELOCITY_WORLD
+        payload.push(TYPE_VELOCITY_WORLD);
         payload.extend_from_slice(&vx.to_le_bytes());
         payload.extend_from_slice(&vy.to_le_bytes());
         payload.extend_from_slice(&vz.to_le_bytes());
@@ -151,7 +161,7 @@ impl Commander {
     /// * `zdistance` - Target height above ground (meters)
     pub async fn setpoint_zdistance(&self, roll: f32, pitch: f32, yawrate: f32, zdistance: f32) -> Result<()> {
         let mut payload = Vec::with_capacity(1 + 4 * 4);
-        payload.push(9); // TYPE_ZDISTANCE
+        payload.push(TYPE_ZDISTANCE);
         payload.extend_from_slice(&roll.to_le_bytes());
         payload.extend_from_slice(&pitch.to_le_bytes());
         payload.extend_from_slice(&yawrate.to_le_bytes());
@@ -170,7 +180,7 @@ impl Commander {
     /// * `zdistance` - Target height above ground (meters)
     pub async fn setpoint_hover(&self, vx: f32, vy: f32, yawrate: f32, zdistance: f32) -> Result<()> {
         let mut payload = Vec::with_capacity(1 + 4 * 4);
-        payload.push(10); // TYPE_HOVER
+        payload.push(TYPE_HOVER);
         payload.extend_from_slice(&vx.to_le_bytes());
         payload.extend_from_slice(&vy.to_le_bytes());
         payload.extend_from_slice(&yawrate.to_le_bytes());
@@ -199,7 +209,7 @@ impl Commander {
         let thrust = 10001.0 + 0.01 * thrust_percentage * (60000.0 - 10001.0);
         let thrust_16 = thrust as u16;
         let mut payload = Vec::with_capacity(1 + 4 * 3 + 2 + 1);
-        payload.push(11); // TYPE_MANUAL
+        payload.push(TYPE_MANUAL);
         payload.extend_from_slice(&roll.to_le_bytes());
         payload.extend_from_slice(&pitch.to_le_bytes());
         payload.extend_from_slice(&yawrate.to_le_bytes());
@@ -212,7 +222,7 @@ impl Commander {
 
     /// Sends a STOP setpoint, immediately stopping the motors. The Crazyflie will lose lift and may fall.
     pub async fn setpoint_stop(&self) -> Result<()> {
-        let payload = vec![0]; // TYPE_STOP
+        let payload = vec![TYPE_STOP];
         let pk = Packet::new(_GENERIC_SETPOINT_PORT, _GENERIC_SETPOINT_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
@@ -224,7 +234,7 @@ impl Commander {
     /// * `remain_valid_milliseconds` - Duration (milliseconds) for which the setpoint remains valid (usually 0)
     pub async fn notify_setpoint_stop(&self, remain_valid_milliseconds: u32) -> Result<()> {
         let mut payload = Vec::with_capacity(1 + 4);
-        payload.push(0); // TYPE_META_COMMAND_NOTIFY_SETPOINT_STOP
+        payload.push(TYPE_META_COMMAND_NOTIFY_SETPOINT_STOP);
         payload.extend_from_slice(&remain_valid_milliseconds.to_le_bytes());
         let pk = Packet::new(_GENERIC_SETPOINT_PORT, _GENERIC_CMD_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
