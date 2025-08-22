@@ -53,8 +53,8 @@ pub struct Commander {
 }
 
 impl Commander {
-    pub(crate) fn new(uplink: Sender<Packet>) -> Commander {
-        Commander { uplink }
+    pub(crate) fn new(uplink: Sender<Packet>) -> Self {
+        Self { uplink }
     }
 }
 
