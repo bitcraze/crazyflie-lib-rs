@@ -12,7 +12,7 @@
 //! | Subsystem | Support |
 //! |-----------|---------|
 //! | App channel | None |
-//! | Commander | Partial (only RPYT) |
+//! | Commander | Full |
 //! | Console | Full |
 //! | High-level Commander | None |
 //! | Localization | None |
