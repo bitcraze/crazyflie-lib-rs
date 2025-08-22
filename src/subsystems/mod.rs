@@ -9,6 +9,7 @@
 //! interact with the Crazyflie.
 
 pub mod commander;
+pub mod high_level_commander;
 pub mod console;
 pub mod log;
 pub mod param;
