@@ -83,7 +83,7 @@ impl Commander {
     pub async fn setpoint_rpyt(&self, roll: f32, pitch: f32, yawrate: f32, thrust: u16) -> Result<()> {
         let mut payload = Vec::new();
         payload.append(&mut roll.to_le_bytes().to_vec());
-        payload.append(&mut (-pitch).to_le_bytes().to_vec());
+        payload.append(&mut (-pitch).to_le_bytes().to_vec());  // TODO: pitch is negated in crazyflie-lib-python, confirm whether this is required.
         payload.append(&mut yawrate.to_le_bytes().to_vec());
         payload.append(&mut thrust.to_le_bytes().to_vec());
 
