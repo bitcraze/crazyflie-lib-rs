@@ -2,12 +2,7 @@ use crazyflie_link::LinkContext;
 use crazyflie_lib::Crazyflie;
 use tokio::time::{sleep, Duration};
 
-/// Example: Demonstrate hover setpoint control using the Rust API.
-///
-/// This example ramps up the hover height, hovers in place, then performs yaw maneuvers while maintaining altitude,
-/// and finally ramps down the hover height before stopping the motors and notifying the firmware.
-///
-/// Uses: `Commander::setpoint_hover(vx, vy, yawrate, zdistance)`
+/// Example that demonstrates hover setpoint control
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,13 +32,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sleep(Duration::from_millis(100)).await;
     }
 
-    // Yaw right while hovering
+    // Yaw left while moving forward
     for _ in 0..50 {
         crazyflie.commander.setpoint_hover(0.2, 0.0, 72.0, 0.4).await?;
         sleep(Duration::from_millis(100)).await;
     }
 
-    // Yaw left while hovering
+    // Yaw right while moving forward
     for _ in 0..50 {
         crazyflie.commander.setpoint_hover(0.2, 0.0, -72.0, 0.4).await?;
         sleep(Duration::from_millis(100)).await;
@@ -64,8 +59,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Stop the motors
     crazyflie.commander.setpoint_stop().await?;
-    // Notify firmware to hand control to high-level commander
-    crazyflie.commander.notify_setpoint_stop(0).await?;
-    println!("Hover maneuver complete. Motors stopped.");
+    println!("Hover setpoint example complete. Motors stopped.");
     Ok(())
 }

@@ -2,11 +2,7 @@ use crazyflie_link::LinkContext;
 use crazyflie_lib::Crazyflie;
 use tokio::time::{sleep, Duration};
 
-/// Example: Fly the Crazyflie to three positions using the high-level Rust API.
-///
-/// This example demonstrates how to move the Crazyflie to a sequence of three target positions `(x, y, z)` with specified yaw angles.
-///
-/// Uses: `Commander::setpoint_position(x, y, z, yaw)`
+/// Example that demonstrates position setpoint control
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Stop the motors after the maneuvers
-    crazyflie.commander.setpoint_rpyt(0.0, 0.0, 0.0, 0).await?;
-    println!("Motors stopped.");
+    crazyflie.commander.setpoint_stop().await?;
+    println!("Position setpoint example complete. Motors stopped.");
     Ok(())
 }
