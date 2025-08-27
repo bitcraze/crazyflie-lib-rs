@@ -88,7 +88,7 @@ impl Commander {
     /// # fn spin(cf: crazyflie_lib::Crazyflie) {
     /// cf.commander.setpoint_rpyt(0.0, 0.0, 0.0, 0);      // Unlocks thrust
     /// cf.commander.setpoint_rpyt(0.0, 0.0, 0.0, 1000);   // Sets thrust to 1000
-    /// }
+    /// # }
     /// ```
     pub async fn setpoint_rpyt(&self, roll: f32, pitch: f32, yawrate: f32, thrust: u16) -> Result<()> {
         let mut payload = Vec::new();
