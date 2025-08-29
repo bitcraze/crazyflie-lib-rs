@@ -9,9 +9,9 @@ to implement a clone of the Crazyflie client's [flight tab].
 The following subsystems are or need to be implemented:
 
  - [ ] App channel
- - [ ] Commander
+ - [x] Commander
    - [x] Basic Roll Pitch Yaw setpoint
-   - [ ] Generic setpoints
+   - [x] Generic setpoints
  - [x] Console
  - [ ] High-level commander
  - [ ] Localization
@@ -20,7 +20,7 @@ The following subsystems are or need to be implemented:
  - [x] Param subsystem
  - [x] Platform services
 
-The [python Crazyflie lib] implements a brunch of higher-level functionality like [swarm support] helpers. Those are out of scope of this crate and will need to be implemented in another specialized crate.
+The [python Crazyflie lib] implements a bunch of higher-level functionality like [swarm support] helpers. Those are out of scope of this crate and will need to be implemented in another specialized crate.
 
 
 [Crazyflie]: https://www.bitcraze.io/products/crazyflie-2-1/
