@@ -201,10 +201,6 @@ impl Commander {
     /// * `thrust_percentage` - Thrust as a percentage (0 to 100)
     /// * `rate` - If true, use rate mode; if false, use angle mode
     pub async fn setpoint_manual(&self, roll: f32, pitch: f32, yawrate: f32, thrust_percentage: f32, rate: bool) -> Result<()> {
-        // if thrust_percentage > 100.0 || thrust_percentage < 0.0 {
-        //     // Use Disconnected error for invalid input, or define a new error type if needed
-        //     return Err(Error::ProtocolError);
-        // }
         // Map thrust percentage to Crazyflie thrust value (10001 to 60000)
         let thrust = 10001.0 + 0.01 * thrust_percentage * (60000.0 - 10001.0);
         let thrust_16 = thrust as u16;
