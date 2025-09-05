@@ -238,7 +238,9 @@ impl Commander {
     /// # Examples
     /// Hand control back to the High-level commander after a manual low-level burst:
     /// ```no_run
-    /// # async fn demo(cmd: &crate::subsystems::commander::Commander) -> anyhow::Result<()> {
+    /// # use crazyflie_lib::subsystems::commander::Commander;
+    /// # use crazyflie_lib::Result;
+    /// # async fn demo(cmd: &Commander) -> Result<()> {
     /// // ... you were sending low-level setpoints here ...
     /// cmd.notify_setpoint_stop(0).await?; // allow HL commander to resume
     /// # Ok(()) }
