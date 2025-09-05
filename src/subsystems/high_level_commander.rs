@@ -1,7 +1,7 @@
 //! # High-level commander subsystem
 //!
 //! This subsystem is responsible for managing high-level commands and setpoints for the Crazyflie.
-//! It builds on top of the (low-level) [Commander] subsystem and provides a more user-friendly interface
+//! It builds on top of the (low-level) [`crate::subsystems::commander::Commander`] subsystem and provides a more user-friendly interface
 //! for controlling the drone's behavior.
 
 use crazyflie_link::Packet;
@@ -10,7 +10,6 @@ use flume::Sender;
 use crate::{Error, Result};
 
 use crate::crazyflie::HL_COMMANDER_PORT;
-use crate::subsystems::commander::Commander;
 
 
 // Command type identifiers
@@ -48,18 +47,32 @@ pub const TRAJECTORY_TYPE_POLY4D_COMPRESSED: u8 = 1;
 ///
 /// # Notes
 /// The high-level commander can be preempted at any time by setpoints from the commander.
-/// To return control to the high-level commander, see [`Commander::notify_setpoint_stop`].
+/// To return control to the high-level commander, see [`crate::subsystems::commander::Commander::notify_setpoint_stop`].
 ///
-/// A `HighLevelCommander` is typically obtained from a [`crate::Crazyflie`] instance:
+/// A `HighLevelCommander` is typically obtained from a [`crate::Crazyflie`] instance.
 ///
+/// # Safe usage pattern
 /// ```no_run
 /// # use crazyflie_link::LinkContext;
 /// # use crazyflie_lib::Crazyflie;
-/// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
-/// let context = LinkContext::new();
-/// let cf = Crazyflie::connect_from_uri(&context, "radio://0/80/2M/E7E7E7E7E7").await?;
-/// cf.high_level_commander.take_off(0.5, None, 2.0, None).await?;
-/// # Ok(()) }
+/// # use tokio::time::{sleep, Duration};
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// # let context = LinkContext::new();
+/// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/80/2M/E7E7E7E7E7").await?;
+/// // Continue flight sequence even if commands fail
+/// let take_off_duration = 2.0;
+/// if let Err(e) = cf.high_level_commander.take_off(0.5, None, take_off_duration, None).await {
+///     eprintln!("Take-off failed: {e}");
+/// }
+/// sleep(Duration::from_secs_f32(take_off_duration)).await;
+///
+/// let land_duration = 2.0;
+/// if let Err(e) = cf.high_level_commander.land(0.0, None, land_duration, None).await {
+///     eprintln!("Landing failed: {e}");
+/// }
+/// sleep(Duration::from_secs_f32(land_duration)).await;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct HighLevelCommander {
