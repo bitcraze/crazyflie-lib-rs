@@ -1,4 +1,5 @@
 use crate::subsystems::commander::Commander;
+use crate::subsystems::high_level_commander::HighLevelCommander;
 use crate::subsystems::console::Console;
 use crate::subsystems::log::Log;
 use crate::subsystems::param::Param;
@@ -23,6 +24,7 @@ pub(crate) const _MEMORY_PORT: u8 = 4;
 pub(crate) const LOG_PORT: u8 = 5;
 pub(crate) const _LOCALIZATION_PORT: u8 = 6;
 pub(crate) const _GENERIC_SETPOINT_PORT: u8 = 7;
+pub(crate) const HL_COMMANDER_PORT: u8 = 8;
 pub(crate) const PLATFORM_PORT: u8 = 13;
 pub(crate) const _LINK_PORT: u8 = 15;
 
@@ -40,6 +42,8 @@ pub struct Crazyflie {
     pub param: Param,
     /// Commander/setpoint subsystem access
     pub commander: Commander,
+    /// High-level commander subsystem access
+    pub high_level_commander: HighLevelCommander,
     /// Console subsystem access
     pub console: Console,
     /// Platform services
@@ -133,6 +137,7 @@ impl Crazyflie {
         let param_future = Param::new(param_downlink, uplink.clone());
 
         let commander = Commander::new(uplink.clone());
+        let high_level_commander = HighLevelCommander::new(uplink.clone());
         let console = Console::new(console_downlink).await?;
 
         // Initialize async modules in parallel
@@ -142,6 +147,7 @@ impl Crazyflie {
             log: log?,
             param: param?,
             commander,
+            high_level_commander,
             console,
             platform,
             uplink_task: Mutex::new(Some(uplink_task)),

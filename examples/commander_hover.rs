@@ -2,7 +2,7 @@ use crazyflie_link::LinkContext;
 use crazyflie_lib::Crazyflie;
 use tokio::time::{sleep, Duration};
 
-/// Example that demonstrates hover setpoint control
+/// Commander example that demonstrates hover setpoint control
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -59,6 +59,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Stop the motors
     crazyflie.commander.setpoint_stop().await?;
+
+    // Notify the Crazyflie that the low-level setpoint has stopped
+    crazyflie.commander.notify_setpoint_stop(0).await?;
+
     println!("Hover setpoint example complete. Motors stopped.");
     Ok(())
 }

@@ -225,10 +225,26 @@ impl Commander {
         Ok(())
     }
 
-    /// Lowers the priority of the current setpoint, allowing any new setpoint (from any source) to overwrite it.
+    /// Notify the firmware that low-level setpoints have stopped.
+    ///
+    /// This tells the Crazyflie to drop the current low-level setpoint priority,
+    /// allowing the High-level commander (or other sources) to take control again.
     ///
     /// # Arguments
-    /// * `remain_valid_milliseconds` - Duration (milliseconds) for which the setpoint remains valid (usually 0)
+    /// * `remain_valid_milliseconds` - How long (in ms) the last low-level setpoint
+    ///   should remain valid before it is considered stale. Use `0` to make the
+    ///   hand-off immediate; small non-zero values can smooth transitions if needed.
+    ///
+    /// # Examples
+    /// Hand control back to the High-level commander after a manual low-level burst:
+    /// ```no_run
+    /// # use crazyflie_lib::subsystems::commander::Commander;
+    /// # use crazyflie_lib::Result;
+    /// # async fn demo(cmd: &Commander) -> Result<()> {
+    /// // ... you were sending low-level setpoints here ...
+    /// cmd.notify_setpoint_stop(0).await?; // allow HL commander to resume
+    /// # Ok(()) }
+    /// ```
     pub async fn notify_setpoint_stop(&self, remain_valid_milliseconds: u32) -> Result<()> {
         let mut payload = Vec::with_capacity(1 + 4);
         payload.push(TYPE_META_COMMAND_NOTIFY_SETPOINT_STOP);

@@ -2,7 +2,7 @@ use crazyflie_link::LinkContext;
 use crazyflie_lib::Crazyflie;
 use tokio::time::{sleep, Duration};
 
-/// Example that demonstrates position setpoint control
+/// Commander example that demonstrates position setpoint control
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -34,6 +34,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Stop the motors after the maneuvers
     crazyflie.commander.setpoint_stop().await?;
-    println!("Position setpoint example complete. Motors stopped.");
+
+    // Notify the Crazyflie that the low-level setpoint has stopped
+    crazyflie.commander.notify_setpoint_stop(0).await?;
+
     Ok(())
 }
