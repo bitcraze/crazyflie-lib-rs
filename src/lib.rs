@@ -14,7 +14,7 @@
 //! | App channel | None |
 //! | Commander | Full |
 //! | Console | Full |
-//! | High-level Commander | None |
+//! | High-level Commander | Full |
 //! | Localization | None |
 //! | Log | Full (V2) |
 //! | Memory | None |
