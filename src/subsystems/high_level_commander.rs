@@ -79,7 +79,7 @@ pub struct HighLevelCommander {
     uplink: Sender<Packet>,
 }
 
-/// TODO: Write this
+/// Constructor methods.
 impl HighLevelCommander {
     /// Create a new HighLevelCommander
     pub fn new(uplink: Sender<Packet>) -> Self {
@@ -109,6 +109,11 @@ impl HighLevelCommander {
 }
 
 /// High-level movement commands.
+///
+/// # Warning
+/// Avoid overlapping movement commands. When a command is sent to a Crazyflie
+/// while another is currently executing, the generated polynomial can take
+/// unexpected routes and have high peaks.
 impl HighLevelCommander {
     /// Take off vertically from the current x-y position to the given target height.
     ///
@@ -170,8 +175,13 @@ impl HighLevelCommander {
         Ok(())
     }
 
-    /// Stop
-    /// TODO
+    /// Stop the current high-level command and disable motors.
+    ///
+    /// This immediately halts any active high-level command (takeoff, land, go_to, spiral, 
+    /// or trajectory execution) and stops motor output.
+    ///
+    /// # Arguments
+    /// * `group_mask` - Bitmask selecting which Crazyflies to command. Use `None` for all Crazyflies.
     pub async fn stop(&self, group_mask: Option<u8>) -> Result<()> {
         let group_mask_value = group_mask.unwrap_or(ALL_GROUPS);
 
@@ -188,8 +198,28 @@ impl HighLevelCommander {
         Ok(())
     }
 
-    /// Go-to
-    /// TODO
+    /// Move to an absolute or relative position with smooth path planning.
+    ///
+    /// The path is designed to transition smoothly from the current state to the target
+    /// position, gradually decelerating at the goal with minimal overshoot. When the 
+    /// system is at hover, the path will be a straight line, but if there is any initial
+    /// velocity, the path will be a smooth curve.
+    ///
+    /// The trajectory is derived by solving for a unique 7th-degree polynomial that
+    /// satisfies the initial conditions of position, velocity, and acceleration, and
+    /// ends at the goal with zero velocity and acceleration. Additionally, the jerk
+    /// (derivative of acceleration) is constrained to be zero at both the starting
+    /// and ending points.
+    ///
+    /// # Arguments
+    /// * `x` - Target x-position in meters
+    /// * `y` - Target y-position in meters
+    /// * `z` - Target z-position in meters
+    /// * `yaw` - Target yaw angle in radians
+    /// * `duration` - Time in seconds to reach the target position
+    /// * `relative` - If `true`, positions and yaw are relative to current position; if `false`, absolute
+    /// * `linear` - If `true`, use linear interpolation; if `false`, use polynomial trajectory
+    /// * `group_mask` - Bitmask selecting which Crazyflies to command. Use `None` for all Crazyflies.
     pub async fn go_to(&self, x: f32, y: f32, z: f32, yaw: f32, duration: f32, relative: bool, linear: bool, group_mask: Option<u8>) -> Result<()> {
         let group_mask_value = group_mask.unwrap_or(ALL_GROUPS);
 
