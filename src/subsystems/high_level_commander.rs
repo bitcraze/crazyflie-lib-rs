@@ -376,7 +376,7 @@ impl HighLevelCommander {
     ///
     /// # Errors
     /// Returns [`Error::Disconnected`] if the command cannot be sent.
-     pub async fn start_trajectory(&self, trajectory_id: u8, time_scale: f32, relative_position: bool, relative_yaw: bool, reversed: bool, group_mask: Option<u8>) -> Result<()> {
+    pub async fn start_trajectory(&self, trajectory_id: u8, time_scale: f32, relative_position: bool, relative_yaw: bool, reversed: bool, group_mask: Option<u8>) -> Result<()> {
         let group_mask_value = group_mask.unwrap_or(ALL_GROUPS);
 
         let mut payload = Vec::with_capacity(5 + 1 * 4);
