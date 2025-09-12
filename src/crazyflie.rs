@@ -22,7 +22,7 @@ pub(crate) const COMMANDER_PORT: u8 = 3;
 pub(crate) const _MEMORY_PORT: u8 = 4;
 pub(crate) const LOG_PORT: u8 = 5;
 pub(crate) const _LOCALIZATION_PORT: u8 = 6;
-pub(crate) const _GENERIC_SETPOINT_PORT: u8 = 7;
+pub(crate) const GENERIC_SETPOINT_PORT: u8 = 7;
 pub(crate) const PLATFORM_PORT: u8 = 13;
 pub(crate) const _LINK_PORT: u8 = 15;
 
