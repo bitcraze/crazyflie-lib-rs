@@ -15,7 +15,7 @@
 //! | Commander | Full |
 //! | Console | Full |
 //! | High-level Commander | None |
-//! | Localization | None |
+//! | Localization | Partial |
 //! | Log | Full (V2) |
 //! | Memory | None |
 //! | Param | Full(V2) |
