@@ -250,15 +250,19 @@ impl Param {
             .wait_packet(PARAM_PORT, _WRITE_CHANNEL, &param_id.to_le_bytes())
             .await?;
 
-        if answer.get_data()[2] == 0 {
+        // Verify the echoed value matches what we tried to set by comparing bytes
+        let expected_bytes: Vec<u8> = value.into();
+        let echoed_bytes = &answer.get_data()[2..];
+        if echoed_bytes == expected_bytes.as_slice() {
+            // Success: firmware echoed back the value we set
             // The param is tested as being in the TOC so this unwrap cannot fail
             *self.values.lock().await.get_mut(param).unwrap() = value;
             self.notify_watchers(param, value).await;
             Ok(())
         } else {
             Err(Error::ParamError(format!(
-                "Error setting the parameter: code {}",
-                answer.get_data()[2]
+                "Parameter set failed: expected bytes {:?}, got echoed bytes {:?}",
+                expected_bytes, echoed_bytes
             )))
         }
     }
