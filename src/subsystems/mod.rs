@@ -13,3 +13,4 @@ pub mod console;
 pub mod log;
 pub mod param;
 pub mod platform;
+pub mod memory;

@@ -31,6 +31,10 @@ pub enum Error {
     SystemError(String),
     /// App channel packets should be no larger than [APPCHANNEL_MTU](crate::subsystems::platform::APPCHANNEL_MTU)
     AppchannelPacketTooLarge,
+    /// Memory content malformed or not as expected. The String contains the reason.
+    MemoryError(String),
+    /// Invalid parameter provided to a function. The String contains the reason.
+    InvalidParameter(String),
 }
 
 impl std::fmt::Display for Error {
