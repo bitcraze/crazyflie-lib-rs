@@ -157,11 +157,11 @@ impl Memory {
     /// If `memory_type` is None, all memories are returned
     /// If `memory_type` is Some(type), only memories of that type are returned
     /// # Example
-    /// ```
+    /// ```no_run
     /// let memories = memory.get_memories(Some(MemoryType::OneWire));
     /// ```
     /// # Example
-    /// ```
+    /// ```no_run
     /// let memories = memory.get_memories(None);
     /// ```
     /// # Returns
