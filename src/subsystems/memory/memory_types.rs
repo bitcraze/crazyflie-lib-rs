@@ -37,7 +37,6 @@ pub struct MemoryDevice {
 
 impl MemoryBackend {
     pub(crate) async fn read(&self, address: usize, length: usize) -> Result<Vec<u8>> {
-        // memory::ReadMemory::new(self.uplink.clone(), self.read_downlink.clone(), memory_id, offset, length)
         let mut data = vec![0; length];
         let mut current_address = address;
         while current_address < address + length {
@@ -45,13 +44,11 @@ impl MemoryBackend {
                 MEM_MAX_REQUEST_SIZE,
                 (address + length) - current_address,
             );
-            // dbg!(&to_read);
             let mut request_data = Vec::new();
             request_data.extend_from_slice(&self.memory_id.to_le_bytes());
             request_data.extend_from_slice(&(current_address as u32).to_le_bytes());
             request_data.extend_from_slice(&(to_read as u8).to_le_bytes());
             let pk = Packet::new(MEMORY_PORT, READ_CHANNEL, request_data.clone());
-            // dbg!(&pk);
             self.uplink
                 .send_async(pk)
                 .await
@@ -63,11 +60,8 @@ impl MemoryBackend {
                 .wait_packet(MEMORY_PORT, READ_CHANNEL, &request_data[0..5])
                 .await;
             if let Ok(pk) = pk {
-                // dbg!(&pk);
                 let pk_data = pk.get_data();
                 let read_address = u32::from_le_bytes(pk_data[1..5].try_into().unwrap());
-                // println!("Length: {}, address: {}, read: {}", pk_data.len(), read_address, pk_data.len() - 6);
-                // println!("Stats: {}", pk_data[4]);
                 if pk_data.len() >= 5 && read_address == current_address as u32 {
                     let read_data = &pk_data[6..];
                     let start = (current_address - address) as usize;
