@@ -17,6 +17,19 @@ The following subsystems are or need to be implemented:
  - [ ] Localization
  - [x] Log subsystem
  - [ ] Memory subsystem
+   - [x] EEPROMConfig
+   - [x] OneWire
+   - [ ] DriverLed
+   - [ ] Loco
+   - [ ] Trajectory
+   - [ ] Loco2
+   - [ ] Lighthouse
+   - [ ] MemoryTester
+   - [ ] DriverLedTiming
+   - [ ] App
+   - [ ] DeckMemory
+   - [ ] DeckMultiranger
+   - [ ] DeckPaa3905
  - [x] Param subsystem
  - [x] Platform services
 
