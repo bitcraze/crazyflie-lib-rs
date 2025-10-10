@@ -1,16 +1,16 @@
-use crate::{subsystems::memory::memory_types, Error, Result};
+use crate::{subsystems::memory::{memory_types, MemoryBackend}, Error, Result};
 use std::{
     convert::{TryFrom, TryInto},
     fmt::{self, Display},
 };
 
-use memory_types::{FromMemoryDevice, MemoryDevice, MemoryType};
+use memory_types::{FromMemoryBackend, MemoryType};
 
 /// Describes the content of the I2C EEPROM used for configuration on the Crazyflie
 /// platform.
 #[derive(Debug)]
 pub struct EEPROMConfigMemory {
-  memory: MemoryDevice,
+  memory: MemoryBackend,
   /// Version of the EEPROM configuration structure.
   version: u8,
   /// Radio frequency channel (0-125) for wireless communication.
@@ -60,8 +60,8 @@ impl Display for RadioSpeed {
   }
 }
 
-impl FromMemoryDevice for EEPROMConfigMemory {
-    async fn from_memory_device(memory: MemoryDevice) -> Result<Self> {
+impl FromMemoryBackend for EEPROMConfigMemory {
+    async fn from_memory_backend(memory: MemoryBackend) -> Result<Self> {
         if memory.memory_type == MemoryType::EEPROMConfig {
             Ok(EEPROMConfigMemory::new(memory).await?)
         } else {
@@ -69,17 +69,21 @@ impl FromMemoryDevice for EEPROMConfigMemory {
         }
     }
 
-    async fn initialize_memory_device(memory: MemoryDevice) -> Result<Self> {
-      if memory.memory_type == MemoryType::EEPROMConfig {
-          Ok(EEPROMConfigMemory::initialize(memory).await?)
-      } else {
-          Err(Error::MemoryError("Wrong type of memory!".to_owned()))
-      }
+    async fn initialize_memory_backend(memory: MemoryBackend) -> Result<Self> {
+        if memory.memory_type == MemoryType::EEPROMConfig {
+            Ok(EEPROMConfigMemory::initialize(memory).await?)
+        } else {
+            Err(Error::MemoryError("Wrong type of memory!".to_owned()))
+        }
+    }
+
+    fn close_memory(self) -> MemoryBackend {
+      self.memory
     }
 }
 
 impl EEPROMConfigMemory {
-    pub(crate) async fn new(memory: MemoryDevice) -> Result<Self> {
+    pub(crate) async fn new(memory: MemoryBackend) -> Result<Self> {
         let data = memory.read(0, 21).await?;
         if data.len() >= 4 && &data[0..4] == b"0xBC" {
             let version = data[4];
@@ -113,7 +117,7 @@ impl EEPROMConfigMemory {
         }
     }
 
-    pub(crate) async fn initialize(memory: MemoryDevice) -> Result<Self> {
+    pub(crate) async fn initialize(memory: MemoryBackend) -> Result<Self> {
       Ok(EEPROMConfigMemory {
         memory,
         version: 0,

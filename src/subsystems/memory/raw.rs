@@ -1,21 +1,24 @@
-use crate::{subsystems::memory::memory_types, Result};
+use crate::{subsystems::memory::{memory_types, MemoryBackend}, Result};
 
-use memory_types::{FromMemoryDevice, MemoryDevice};
+use memory_types::{FromMemoryBackend};
 
 /// This is used to get raw memory access to any memory device.
 pub struct RawMemory {
-    memory: MemoryDevice,
+    memory: MemoryBackend,
 }
 
-impl FromMemoryDevice for RawMemory {
-    async fn from_memory_device(memory: MemoryDevice) -> Result<Self> {
+impl FromMemoryBackend for RawMemory {
+    async fn from_memory_backend(memory: MemoryBackend) -> Result<Self> {
         Ok(Self { memory })
     }
 
-    async fn initialize_memory_device(memory: MemoryDevice) -> Result<Self> {
+    async fn initialize_memory_backend(memory: MemoryBackend) -> Result<Self> {
         Ok(Self { memory })
-    } 
+    }
 
+    fn close_memory(self) -> MemoryBackend {
+      self.memory
+    }
 }
 
 impl RawMemory {

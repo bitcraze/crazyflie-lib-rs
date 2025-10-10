@@ -10,6 +10,20 @@ const WRITE_CHANNEL: u8 = 2;
 
 const MEM_MAX_READ_REQUEST_SIZE: usize = 20;
 
+
+/// Description of a memory in the Crazyflie
+#[derive(Debug, Clone)]
+pub struct MemoryBackend {
+    /// Unique identifier for this memory subsystem (used when reading/writing/querying)
+    pub memory_id: u8,
+    /// Type of memory
+    pub memory_type: MemoryType,
+
+    pub(crate) uplink: channel::Sender<Packet>,
+    //TODO: Lock this!
+    pub(crate) read_downlink: channel::Receiver<Packet>,
+    pub(crate) write_downlink: channel::Receiver<Packet>,
+}
 /// Description of a memory in the Crazyflie
 #[derive(Debug, Clone)]
 pub struct MemoryDevice {
@@ -18,15 +32,10 @@ pub struct MemoryDevice {
     /// Type of memory
     pub memory_type: MemoryType,
     /// Size of the memory in bytes
-    pub size: u32,
-
-    pub(crate) uplink: channel::Sender<Packet>,
-    //TODO: Lock this!
-    pub(crate) read_downlink: channel::Receiver<Packet>,
-    pub(crate) write_downlink: channel::Receiver<Packet>,
+    pub size: u32
 }
 
-impl MemoryDevice {
+impl MemoryBackend {
     pub(crate) async fn read(&self, address: usize, length: usize) -> Result<Vec<u8>> {
         // memory::ReadMemory::new(self.uplink.clone(), self.read_downlink.clone(), memory_id, offset, length)
         let mut data = vec![0; length];
@@ -100,7 +109,7 @@ impl MemoryDevice {
                 .ok();
             current_address += to_write;
 
-            let pk = self
+            let _pk = self
                 .write_downlink
                 .wait_packet(MEMORY_PORT, WRITE_CHANNEL, &request_data[0..5])
                 .await;
@@ -121,17 +130,31 @@ impl MemoryDevice {
 /// - The memory device cannot be accessed
 /// - The data format is invalid or corrupted
 /// - Required data is missing from the memory device
-pub trait FromMemoryDevice: Sized {
-    /// Create a memory-specific type from a `MemoryDevice`. When created the
+pub trait FromMemoryBackend: Sized {
+    /// Create a memory-specific type from a `MemoryBackend`. When created the
     /// memory is automatically read to populate the fields of the type.
     /// 
     /// # Arguments
-    /// * `memory` - The `MemoryDevice` to read from
+    /// * `memory` - The `MemoryBackend` to read from
     /// # Returns
     /// A `Result` containing the constructed type or an `Error` if the operation fails
-    async fn from_memory_device(memory: MemoryDevice) -> Result<Self>;
+    fn from_memory_backend(memory: MemoryBackend) -> impl std::future::Future<Output = Result<Self>> + Send;
 
-    async fn initialize_memory_device(memory: MemoryDevice) -> Result<Self>;
+    /// Get a specific memory by its ID and initialize it according to the defaults. Note that the
+    /// values will not be written to the memory by default, the user needs to handle this.
+    /// 
+    /// # Arguments
+    /// * `memory` - The MemoryDevice struct representing the memory to get
+    /// # Returns
+    /// An Option containing a reference to the MemoryDevice struct if found, or None if not found
+    fn initialize_memory_backend(memory: MemoryBackend) -> impl std::future::Future<Output = Result<Self>> + Send;
+
+    /// Close the memory and return the backend to the subsystem
+    ///
+    /// # Arguments
+    /// * `memory_device` - The MemoryDevice struct representing the memory to close
+    /// * `backend` - The MemoryBackend to return to the subsystem
+    fn close_memory(self) -> MemoryBackend;
 }
 
 /// The memory types supported by the Crazyflie

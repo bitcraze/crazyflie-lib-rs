@@ -34,6 +34,7 @@ pub use ow::*;
 #[derive(Debug)]
 pub struct Memory {
     memories: Vec<MemoryDevice>,
+    backends: Vec<Mutex<Option<MemoryBackend>>>,
     memory_read_dispatcher: MemoryDispatcher,
     memory_write_dispatcher: MemoryDispatcher,
 }
@@ -48,7 +49,7 @@ const CMD_INFO_DETAILS: u8 = 2;
 
 #[derive(Debug)]
 struct MemoryDispatcher {
-  channel: u8,
+  // _channel: u8,
   senders: Arc<Mutex<HashMap<u8, channel::Sender<Packet>>>>,
 }
 
@@ -74,7 +75,7 @@ impl MemoryDispatcher {
     });
 
     Self {
-      channel: channel,
+      // channel: channel,
       senders: senders,
     }
   }
@@ -100,6 +101,7 @@ impl Memory {
 
         let mut memory = Self {
             memories: Vec::new(),
+            backends: Vec::new(),
             memory_read_dispatcher: MemoryDispatcher::new(read_channel_downlink.clone(), READ_CHANNEL),
             memory_write_dispatcher: MemoryDispatcher::new(write_channel_downlink.clone(), WRITE_CHANNEL),
         };
@@ -134,14 +136,18 @@ impl Memory {
 
         self.memories.push(MemoryDevice {
           memory_id: memory_id,
-          memory_type,
-          size: memory_size,
+          memory_type: memory_type,
+          size: memory_size
+        });
+
+        self.backends.push(Mutex::new(Some(MemoryBackend {
+          memory_id: memory_id,
+          memory_type: memory_type,
           uplink: uplink.clone(),
           read_downlink: self.memory_read_dispatcher.get_channel(memory_id).await,
           write_downlink: self.memory_write_dispatcher.get_channel(memory_id).await,
-        });
+        })));
       }
-
       Ok(())
 
     }
@@ -168,22 +174,46 @@ impl Memory {
       }
     }
 
-    pub async fn erase(&self, memory: MemoryDevice) -> Result<()> {
-      Ok(())
-    }
-
     /// Get a specific memory by its ID
     /// 
     /// # Arguments
     /// * `memory` - The MemoryDevice struct representing the memory to get
     /// # Returns
     /// An Option containing a reference to the MemoryDevice struct if found, or None if not found
-    pub async fn get_memory<T: FromMemoryDevice>(&self, memory: MemoryDevice) -> Option<Result<T>> {
-        Some(T::from_memory_device(memory).await)
+    pub async fn open_memory<T: FromMemoryBackend>(&self, memory: MemoryDevice) -> Option<Result<T>> {
+      let backend = self.backends.get(memory.memory_id as usize)?.lock().await.take()?;
+      Some(T::from_memory_backend(backend).await)
     }
 
-    pub async fn initialize_memory<T: FromMemoryDevice>(&self, memory: MemoryDevice) -> Option<Result<T>> {
-        Some(T::initialize_memory_device(memory).await)
+    /// Close a memory
+    /// 
+    /// # Arguments
+    /// * `memory_device` - The MemoryDevice struct representing the memory to close
+    /// * `backend` - The MemoryBackend to return to the subsystem
+    pub async fn close_memory<T: FromMemoryBackend>(&self, device: T) {
+      let backend = device.close_memory();
+      if let Some(mutex) = self.backends.get(backend.memory_id as usize) {
+        let mut guard = mutex.lock().await;
+        if guard.is_none() {
+          *guard = Some(backend);
+        } else {
+          println!("Warning: Attempted to close memory ID {} which is already closed", backend.memory_id);
+        }
+      } else {
+        println!("Warning: Attempted to close memory ID {} which does not exist", backend.memory_id);
+      }
+    }
+
+    /// Get a specific memory by its ID and initialize it according to the defaults. Note that the
+    /// values will not be written to the memory by default, the user needs to handle this.
+    /// 
+    /// # Arguments
+    /// * `memory` - The MemoryDevice struct representing the memory to get
+    /// # Returns
+    /// An Option containing a reference to the MemoryDevice struct if found, or None if not found
+    pub async fn initialize_memory<T: FromMemoryBackend>(&self, memory: MemoryDevice) -> Option<Result<T>> {
+        let backend = self.backends.get(memory.memory_id as usize)?.lock().await.take()?;
+        Some(T::initialize_memory_backend(backend).await)
     }
 
 }

@@ -1,28 +1,79 @@
 use std::collections::HashMap;
 
-use crate::{subsystems::memory::memory_types, Error, Result};
-use memory_types::{FromMemoryDevice, MemoryDevice, MemoryType};
+use crate::{subsystems::memory::{memory_types, MemoryBackend}, Error, Result};
+use memory_types::{FromMemoryBackend, MemoryType};
 
-
+/// Describes the content of a Crazyflie decks 1-wire memory
 #[derive(Debug)]
 pub struct OwMemory {
-    memory: MemoryDevice,
-    pub used_pins: u32,
-    pub vid: u8,
-    pub pid: u8,
-    pub elements: HashMap<String, String>
+    memory: MemoryBackend,
+    /// Bitmap of used GPIO pins used for output
+    used_pins: u32,
+    /// Vendor ID
+    vid: u8,
+    /// Product ID
+    pid: u8,
+    /// Key-value pairs of elements stored in the memory
+    elements: HashMap<String, String>
+  }
+
+  impl OwMemory {
+    /// Gets the bitmap of used GPIO pins
+    pub fn used_pins(&self) -> u32 {
+      self.used_pins
+    }
+
+    /// Sets the bitmap of used GPIO pins
+    pub fn set_used_pins(&mut self, used_pins: u32) {
+      self.used_pins = used_pins;
+    }
+
+    /// Gets the vendor ID
+    pub fn vid(&self) -> u8 {
+      self.vid
+    }
+
+    /// Sets the vendor ID
+    pub fn set_vid(&mut self, vid: u8) {
+      self.vid = vid;
+    }
+
+    /// Gets the product ID
+    pub fn pid(&self) -> u8 {
+      self.pid
+    }
+
+    /// Sets the product ID
+    pub fn set_pid(&mut self, pid: u8) {
+      self.pid = pid;
+    }
+
+    /// Gets a reference to the elements map
+    pub fn elements(&self) -> &HashMap<String, String> {
+      &self.elements
+    }
+
+    /// Gets a mutable reference to the elements map
+    pub fn elements_mut(&mut self) -> &mut HashMap<String, String> {
+      &mut self.elements
+    }
+
+    /// Sets the elements map
+    pub fn set_elements(&mut self, elements: HashMap<String, String>) {
+      self.elements = elements;
+    }
 }
 
-impl FromMemoryDevice for OwMemory {
-    async fn from_memory_device(memory: MemoryDevice) -> Result<Self> {
+impl FromMemoryBackend for OwMemory {
+    async fn from_memory_backend(memory: MemoryBackend) -> Result<Self> {
         if memory.memory_type == MemoryType::OneWire {
-            Ok(OwMemory::new( memory).await?)
+            Ok(OwMemory::new(memory).await?)
         } else {
             Err(Error::MemoryError("Wrong type of memory!".to_owned()))
         }
     }
 
-    async fn initialize_memory_device(memory: MemoryDevice) -> Result<Self> {
+    async fn initialize_memory_backend(memory: MemoryBackend) -> Result<Self> {
         if memory.memory_type == MemoryType::OneWire {
             Ok(OwMemory::initialize(memory).await?)
         } else {
@@ -30,10 +81,13 @@ impl FromMemoryDevice for OwMemory {
         }
     }
 
+    fn close_memory(self) -> MemoryBackend {
+      self.memory
+    }
 }
 
 impl OwMemory {
-    pub(crate) async fn new(memory: MemoryDevice) -> Result<Self> {
+    pub(crate) async fn new(memory: MemoryBackend) -> Result<Self> {
         let header = memory.read(0, 8).await?;
 
         // Validate header byte
@@ -92,7 +146,7 @@ impl OwMemory {
         }
     }
 
-    pub(crate) async fn initialize(memory: MemoryDevice) -> Result<Self> {
+    pub(crate) async fn initialize(memory: MemoryBackend) -> Result<Self> {
       Ok(OwMemory {
         memory,
         used_pins: 0,
