@@ -1,8 +1,8 @@
 //! # Localization subsystem
 //!
 //! This subsystem provides access to the Crazyflie's localization services including
-//! emergency stop controls, external position/pose streaming, and lighthouse positioning
-//! system data.
+//! emergency stop controls, external position/pose streaming, lighthouse positioning
+//! system data, and Loco Positioning System (UWB) communication.
 //!
 //! ## Emergency Stop
 //!
@@ -50,6 +50,19 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! ## Loco Positioning System
+//!
+//! Send Loco Positioning Protocol (LPP) packets to ultra-wide-band positioning nodes:
+//! ```no_run
+//! # async fn loco_pos(crazyflie: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
+//! // Send LPP packet to node 5
+//! let lpp_data = vec![0x01, 0x02, 0x03];
+//! crazyflie.localization.loco_positioning
+//!     .send_short_lpp_packet(5, &lpp_data).await?;
+//! # Ok(())
+//! # }
+//! ```
 
 use crazyflie_link::Packet;
 use flume::{Receiver, Sender};
@@ -68,7 +81,7 @@ const GENERIC_CHANNEL: u8 = 1;
 // Generic channel message types
 const _RANGE_STREAM_REPORT: u8 = 0;
 const _RANGE_STREAM_REPORT_FP16: u8 = 1;
-const _LPS_SHORT_LPP_PACKET: u8 = 2;
+const LPS_SHORT_LPP_PACKET: u8 = 2;
 const EMERGENCY_STOP: u8 = 3;
 const EMERGENCY_STOP_WATCHDOG: u8 = 4;
 const _COMM_GNSS_NMEA: u8 = 6;
@@ -107,6 +120,8 @@ pub struct Localization{
     pub external_pose: ExternalPose,
     /// Lighthouse positioning system
     pub lighthouse: Lighthouse,
+    /// Loco Positioning System (UWB)
+    pub loco_positioning: LocoPositioning,
 }
 
 impl Localization {
@@ -154,7 +169,9 @@ impl Localization {
             persist_receiver,
         };
 
-        Self { emergency, external_pose, lighthouse }
+        let loco_positioning = LocoPositioning { uplink: uplink.clone() };
+
+        Self { emergency, external_pose, lighthouse, loco_positioning }
     }
 }
 
@@ -290,6 +307,32 @@ impl ExternalPose {
         payload.extend_from_slice(&quat[1].to_le_bytes());
         payload.extend_from_slice(&quat[2].to_le_bytes());
         payload.extend_from_slice(&quat[3].to_le_bytes());
+
+        let pk = Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, payload);
+        self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
+        Ok(())
+    }
+}
+
+/// Loco Positioning System (UWB) interface
+///
+/// Provides functionality to send Loco Positioning Protocol (LPP) packets
+/// to ultra-wide-band positioning nodes.
+pub struct LocoPositioning {
+    uplink: Sender<Packet>,
+}
+
+impl LocoPositioning {
+    /// Send Loco Positioning Protocol (LPP) packet to a specific destination
+    ///
+    /// # Arguments
+    /// * `dest_id` - Destination node ID
+    /// * `data` - LPP packet payload
+    pub async fn send_short_lpp_packet(&self, dest_id: u8, data: &[u8]) -> Result<()> {
+        let mut payload = Vec::with_capacity(2 + data.len());
+        payload.push(LPS_SHORT_LPP_PACKET);
+        payload.push(dest_id);
+        payload.extend_from_slice(data);
 
         let pk = Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
