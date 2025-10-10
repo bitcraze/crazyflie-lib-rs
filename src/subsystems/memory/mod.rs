@@ -156,11 +156,28 @@ impl Memory {
     /// If `memory_type` is Some(type), only memories of that type are returned
     /// # Example
     /// ```no_run
-    /// let memories = memory.get_memories(Some(MemoryType::OneWire));
+    /// use crazyflie_lib::subsystems::memory::MemoryType;
+    /// use crazyflie_lib::{Crazyflie, Value, Error};
+    /// use crazyflie_link::LinkContext;
+    /// async fn example() -> Result<(), Error> {
+    ///   let context = LinkContext::new();
+    ///   let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await?;
+    ///   let memories = cf.memory.get_memories(Some(MemoryType::OneWire));
+    ///   Ok(())
+    /// };
+    /// 
     /// ```
     /// # Example
     /// ```no_run
-    /// let memories = memory.get_memories(None);
+    /// use crazyflie_lib::subsystems::memory::MemoryType;
+    /// use crazyflie_lib::{Crazyflie, Value, Error};
+    /// use crazyflie_link::LinkContext;
+    /// async fn example() -> Result<(), Error> {
+    ///   let context = LinkContext::new();
+    ///   let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await?;
+    ///   let memories = cf.memory.get_memories(None);
+    ///   Ok(())
+    /// };
     /// ```
     /// # Returns
     /// A vector of references to MemoryDevice structs
