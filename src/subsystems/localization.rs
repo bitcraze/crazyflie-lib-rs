@@ -364,15 +364,16 @@ impl Lighthouse {
     /// ```no_run
     /// # use crazyflie_lib::Crazyflie;
     /// # use futures::StreamExt;
-    /// # async fn example(crazyflie: &Crazyflie) {
+    /// # async fn example(crazyflie: &Crazyflie) -> Result<(), Box<dyn std::error::Error>> {
     /// // Enable angle streaming
-    /// crazyflie.param.set_value("locSrv.enLhAngleStream", &1u8.into()).await.unwrap();
+    /// crazyflie.param.set("locSrv.enLhAngleStream", 1u8).await?;
     ///
     /// let mut angle_stream = crazyflie.localization.lighthouse.angle_stream().await;
     /// while let Some(data) = angle_stream.next().await {
     ///     println!("Base station {}: x={:?}, y={:?}",
     ///         data.base_station, data.angles.x, data.angles.y);
     /// }
+    /// # Ok(())
     /// # }
     /// ```
     pub async fn angle_stream(&self) -> impl Stream<Item = LighthouseAngleData> {
