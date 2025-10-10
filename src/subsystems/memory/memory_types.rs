@@ -8,7 +8,7 @@ use crate::crazyflie::MEMORY_PORT;
 const READ_CHANNEL: u8 = 1;
 const WRITE_CHANNEL: u8 = 2;
 
-const MEM_MAX_READ_REQUEST_SIZE: usize = 20;
+const MEM_MAX_REQUEST_SIZE: usize = 20;
 
 
 /// Description of a memory in the Crazyflie
@@ -42,7 +42,7 @@ impl MemoryBackend {
         let mut current_address = address;
         while current_address < address + length {
             let to_read = std::cmp::min(
-                MEM_MAX_READ_REQUEST_SIZE,
+                MEM_MAX_REQUEST_SIZE,
                 (address + length) - current_address,
             );
             // dbg!(&to_read);
@@ -74,10 +74,10 @@ impl MemoryBackend {
                     let end = start + read_data.len();
                     data[start..end].copy_from_slice(read_data);
                 } else {
-                    println!("Warning: Malformed memory read response");
+                    return Err(Error::MemoryError("Malformed memory read response".into()));
                 }
             } else {
-                println!("Warning: Failed to read memory");
+                return Err(Error::MemoryError("Failed to read memory".into()));
             }
 
             current_address += to_read;
@@ -91,7 +91,7 @@ impl MemoryBackend {
         let length = data.len();
         while current_address < address + length {
             let to_write = std::cmp::min(
-                MEM_MAX_READ_REQUEST_SIZE,
+                MEM_MAX_REQUEST_SIZE,
                 (address + length) - current_address,
             );
             let start = (current_address - address) as usize;

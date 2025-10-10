@@ -133,17 +133,13 @@ impl OwMemory {
 
         let elements_map = Self::parse_elements(&elements);
 
-        if header.len() == 8 {
-            Ok(OwMemory {
-              memory,
-              used_pins,
-              vid,
-              pid,
-              elements: elements_map
-            })
-        } else {
-            Err(Error::MemoryError("Invalid OneWire memory data".to_owned()))
-        }
+        Ok(OwMemory {
+          memory,
+          used_pins,
+          vid,
+          pid,
+          elements: elements_map
+        })
     }
 
     pub(crate) async fn initialize(memory: MemoryBackend) -> Result<Self> {
