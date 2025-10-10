@@ -49,7 +49,6 @@ const CMD_INFO_DETAILS: u8 = 2;
 
 #[derive(Debug)]
 struct MemoryDispatcher {
-  // _channel: u8,
   senders: Arc<Mutex<HashMap<u8, channel::Sender<Packet>>>>,
 }
 
@@ -75,7 +74,6 @@ impl MemoryDispatcher {
     });
 
     Self {
-      // channel: channel,
       senders: senders,
     }
   }
