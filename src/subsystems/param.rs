@@ -250,15 +250,32 @@ impl Param {
             .wait_packet(PARAM_PORT, _WRITE_CHANNEL, &param_id.to_le_bytes())
             .await?;
 
-        if answer.get_data()[2] == 0 {
+        // Success response: firmware echoes back the written value
+        let expected_bytes: Vec<u8> = value.into();
+        let data = answer.get_data();
+        if data.len() < 2 {
+            return Err(Error::ProtocolError(
+                format!("Parameter write response too short: expected at least 2 bytes, got {}", data.len())
+            ));
+        }
+        let echoed_bytes = &data[2..];
+
+        if echoed_bytes == expected_bytes.as_slice() {
             // The param is tested as being in the TOC so this unwrap cannot fail
             *self.values.lock().await.get_mut(param).unwrap() = value;
             self.notify_watchers(param, value).await;
             Ok(())
         } else {
+            // If echoed value doesn't match, it's likely a parameter error code
+            if echoed_bytes.is_empty() {
+                return Err(Error::ProtocolError(
+                    "Parameter write response invalid: no error code or echoed value".to_string()
+                ));
+            }
+            let error_code = echoed_bytes[0]; // For u8 params, single byte error code
             Err(Error::ParamError(format!(
-                "Error setting the parameter: code {}",
-                answer.get_data()[2]
+                "Error setting parameter: parameter error code {}",
+                error_code
             )))
         }
     }
