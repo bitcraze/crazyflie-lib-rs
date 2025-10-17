@@ -18,6 +18,8 @@ const VERSION_CHANNEL: u8 = 1;
 const APP_CHANNEL: u8 = 2;
 
 const PLATFORM_SET_CONT_WAVE: u8 = 0;
+const PLATFORM_REQUEST_ARMING: u8 = 1;
+const PLATFORM_REQUEST_CRASH_RECOVERY: u8 = 2;
 
 const VERSION_GET_PROTOCOL: u8 = 0;
 const VERSION_GET_FIRMWARE: u8 = 1;
@@ -163,6 +165,39 @@ impl Platform {
                 PLATFORM_PORT,
                 PLATFORM_COMMAND,
                 vec![PLATFORM_SET_CONT_WAVE, command],
+            ))
+            .await?;
+        Ok(())
+    }
+
+    /// Send system arm/disarm request
+    ///
+    /// Arms or disarms the Crazyflie's safety systems. When disarmed, the motors
+    /// will not spin even if thrust commands are sent.
+    ///
+    /// # Arguments
+    /// * `do_arm` - true to arm, false to disarm
+    pub async fn send_arming_request(&self, do_arm: bool) -> Result<()> {
+        let command = if do_arm { 1 } else { 0 };
+        self.uplink
+            .send_async(Packet::new(
+                PLATFORM_PORT,
+                PLATFORM_COMMAND,
+                vec![PLATFORM_REQUEST_ARMING, command],
+            ))
+            .await?;
+        Ok(())
+    }
+
+    /// Send crash recovery request
+    ///
+    /// Requests recovery from a crash state detected by the Crazyflie.
+    pub async fn send_crash_recovery_request(&self) -> Result<()> {
+        self.uplink
+            .send_async(Packet::new(
+                PLATFORM_PORT,
+                PLATFORM_COMMAND,
+                vec![PLATFORM_REQUEST_CRASH_RECOVERY],
             ))
             .await?;
         Ok(())

@@ -11,11 +11,11 @@
 //!
 //! | Subsystem | Support |
 //! |-----------|---------|
-//! | App channel | None |
+//! | App channel | Full |
 //! | Commander | Full |
 //! | Console | Full |
 //! | High-level Commander | None |
-//! | Localization | None |
+//! | Localization | Full |
 //! | Log | Full (V2) |
 //! | Memory | None |
 //! | Param | Full(V2) |

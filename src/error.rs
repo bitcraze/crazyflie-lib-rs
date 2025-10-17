@@ -31,6 +31,8 @@ pub enum Error {
     SystemError(String),
     /// App channel packets should be no larger than [APPCHANNEL_MTU](crate::subsystems::platform::APPCHANNEL_MTU)
     AppchannelPacketTooLarge,
+    /// Operation timed out waiting for response.
+    Timeout,
 }
 
 impl std::fmt::Display for Error {
