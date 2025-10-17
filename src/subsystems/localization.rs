@@ -380,6 +380,41 @@ impl Lighthouse {
         self.angle_stream_receiver.clone()
     }
 
+    /// Persist lighthouse geometry and calibration data to permanent storage
+    ///
+    /// Sends a command to persist lighthouse geometry and/or calibration data
+    /// to permanent storage in the Crazyflie, then waits for confirmation.
+    /// The geometry and calibration data must have been previously written to
+    /// RAM via the memory subsystem.
+    ///
+    /// # Arguments
+    /// * `geo_list` - List of base station IDs (0-15) for which to persist geometry data
+    /// * `calib_list` - List of base station IDs (0-15) for which to persist calibration data
+    ///
+    /// # Returns
+    /// * `Ok(true)` if data was successfully persisted
+    /// * `Ok(false)` if persistence failed
+    /// * `Err` if there was a communication error or timeout (5 seconds)
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use crazyflie_lib::Crazyflie;
+    /// # async fn example(crazyflie: &Crazyflie) -> crazyflie_lib::Result<()> {
+    /// // Persist geometry for base stations 0 and 1, calibration for base station 0
+    /// let success = crazyflie.localization.lighthouse
+    ///     .persist_lighthouse_data(&[0, 1], &[0]).await?;
+    ///
+    /// if success {
+    ///     println!("Data persisted successfully");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn persist_lighthouse_data(&self, geo_list: &[u8], calib_list: &[u8]) -> Result<bool> {
+        self.send_lh_persist_data_packet(geo_list, calib_list).await?;
+        self.wait_persist_confirmation().await
+    }
+
     /// Wait for lighthouse persistence confirmation
     ///
     /// After sending geometry or calibration data to be persisted (via
@@ -389,7 +424,7 @@ impl Lighthouse {
     /// Returns `Ok(true)` if data was successfully persisted, `Ok(false)` if
     /// persistence failed, or an error if no confirmation is received within
     /// the timeout.
-    pub async fn wait_persist_confirmation(&self) -> Result<bool> {
+    async fn wait_persist_confirmation(&self) -> Result<bool> {
         let mut receiver = self.persist_receiver.clone();
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -412,22 +447,7 @@ impl Lighthouse {
     /// * `calib_list` - List of base station IDs (0-15) for which to persist calibration data
     ///
     /// Use [wait_persist_confirmation] to wait for the result.
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use crazyflie_lib::Crazyflie;
-    /// # async fn example(crazyflie: &Crazyflie) -> crazyflie_lib::Result<()> {
-    /// // Persist geometry for base stations 0 and 1, calibration for base station 0
-    /// crazyflie.localization.lighthouse
-    ///     .send_lh_persist_data_packet(&[0, 1], &[0]).await?;
-    ///
-    /// if crazyflie.localization.lighthouse.wait_persist_confirmation().await? {
-    ///     println!("Data persisted successfully");
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn send_lh_persist_data_packet(&self, geo_list: &[u8], calib_list: &[u8]) -> Result<()> {
+   async fn send_lh_persist_data_packet(&self, geo_list: &[u8], calib_list: &[u8]) -> Result<()> {
         // Validate base station IDs
         const MAX_BS_NR: u8 = 15;
         for &bs in geo_list {

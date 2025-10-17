@@ -47,20 +47,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         calib_base_stations
     );
 
-    // Send persist command
-    crazyflie
-        .localization
-        .lighthouse
-        .send_lh_persist_data_packet(&geo_base_stations, &calib_base_stations)
-        .await?;
+    // Persist data (sends command and waits for confirmation with 5 second timeout)
+    println!("Persisting data and waiting for confirmation...");
 
-    println!("Persist command sent, waiting for confirmation...");
-
-    // Wait for confirmation (with 5 second timeout)
     match crazyflie
         .localization
         .lighthouse
-        .wait_persist_confirmation()
+        .persist_lighthouse_data(&geo_base_stations, &calib_base_stations)
         .await
     {
         Ok(true) => {
@@ -70,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("✗ Persistence failed!");
         }
         Err(e) => {
-            println!("✗ Error waiting for confirmation: {}", e);
+            println!("✗ Error: {}", e);
         }
     }
 
