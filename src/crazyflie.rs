@@ -1,6 +1,7 @@
 use crate::subsystems::commander::Commander;
 use crate::subsystems::console::Console;
 use crate::subsystems::log::Log;
+use crate::subsystems::memory::Memory;
 use crate::subsystems::param::Param;
 
 use crate::crtp_utils::CrtpDispatch;
@@ -19,7 +20,7 @@ use std::time::Duration;
 pub(crate) const CONSOLE_PORT: u8 = 0;
 pub(crate) const PARAM_PORT: u8 = 2;
 pub(crate) const COMMANDER_PORT: u8 = 3;
-pub(crate) const _MEMORY_PORT: u8 = 4;
+pub(crate) const MEMORY_PORT: u8 = 4;
 pub(crate) const LOG_PORT: u8 = 5;
 pub(crate) const _LOCALIZATION_PORT: u8 = 6;
 pub(crate) const _GENERIC_SETPOINT_PORT: u8 = 7;
@@ -38,6 +39,8 @@ pub struct Crazyflie {
     pub log: Log,
     /// Parameter subsystem access
     pub param: Param,
+    /// Memory subsystem access
+    pub memory: Memory,
     /// Commander/setpoint subsystem access
     pub commander: Commander,
     /// Console subsystem access
@@ -111,6 +114,7 @@ impl Crazyflie {
         let log_downlink = dispatcher.get_port_receiver(LOG_PORT).unwrap();
         let param_downlink = dispatcher.get_port_receiver(PARAM_PORT).unwrap();
         let console_downlink = dispatcher.get_port_receiver(CONSOLE_PORT).unwrap();
+        let memory_downlink = dispatcher.get_port_receiver(MEMORY_PORT).unwrap();
 
         // Start the downlink packet dispatcher
         let dispatch_task = dispatcher.run().await?;
@@ -131,16 +135,18 @@ impl Crazyflie {
         // The get_port_receiver calls are guaranteed to work if the same port is not used twice (any way to express that at compile time?)
         let log_future = Log::new(log_downlink, uplink.clone());
         let param_future = Param::new(param_downlink, uplink.clone());
+        let memory_future = Memory::new(memory_downlink, uplink.clone());
 
         let commander = Commander::new(uplink.clone());
         let console = Console::new(console_downlink).await?;
 
         // Initialize async modules in parallel
-        let (log, param) = futures::join!(log_future, param_future);
+        let (log, param, memory) = futures::join!(log_future, param_future, memory_future);
 
         Ok(Crazyflie {
             log: log?,
             param: param?,
+            memory: memory?,
             commander,
             console,
             platform,

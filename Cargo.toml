@@ -24,6 +24,8 @@ num_enum = "0.7.3"
 half = "2.4.1"
 async-broadcast = "0.7.1"
 tokio = { version = "1.36.0", features = ["full"] }
+crc32fast = "1.5.0"
+hex = "0.4.3"
 
 [dev-dependencies]
 env_logger = "0.11.5"
