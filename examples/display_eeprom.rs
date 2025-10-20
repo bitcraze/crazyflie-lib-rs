@@ -1,6 +1,6 @@
 use crazyflie_lib::subsystems::memory::{EEPROMConfigMemory, MemoryType};
 
-const URI: &str = "radio://0/60/2M/E7E7E7E7E7";
+const URI: &str = "radio://0/80/2M/E7E7E7E7E7";
 
 // Example that displays the EEPROM config memory contents
 #[tokio::main]

@@ -1,4 +1,4 @@
-const URI: &str = "radio://0/60/2M/E7E7E7E7E7";
+const URI: &str = "radio://0/80/2M/E7E7E7E7E7";
 
 // Example that prints a list of the memories
 #[tokio::main]
