@@ -12,7 +12,7 @@ const MEM_MAX_REQUEST_SIZE: usize = 20;
 
 
 /// Description of a memory in the Crazyflie
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MemoryBackend {
     /// Unique identifier for this memory subsystem (used when reading/writing/querying)
     pub memory_id: u8,
@@ -20,7 +20,6 @@ pub struct MemoryBackend {
     pub memory_type: MemoryType,
 
     pub(crate) uplink: channel::Sender<Packet>,
-    //TODO: Lock this!
     pub(crate) read_downlink: channel::Receiver<Packet>,
     pub(crate) write_downlink: channel::Receiver<Packet>,
 }
