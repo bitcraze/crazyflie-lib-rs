@@ -62,11 +62,15 @@ impl MemoryBackend {
             if let Ok(pk) = pk {
                 let pk_data = pk.get_data();
                 let read_address = u32::from_le_bytes(pk_data[1..5].try_into().unwrap());
-                if pk_data.len() >= 5 && read_address == current_address as u32 {
+                let status = pk_data[5];
+
+                if pk_data.len() >= 5 && read_address == current_address as u32 && status == 0 {
                     let read_data = &pk_data[6..];
                     let start = (current_address - address) as usize;
                     let end = start + read_data.len();
                     data[start..end].copy_from_slice(read_data);
+                } else if status != 0 {
+                    return Err(Error::MemoryError(format!("Memory read returned error status ({}) @ {}", status, current_address)));
                 } else {
                     return Err(Error::MemoryError("Malformed memory read response".into()));
                 }
