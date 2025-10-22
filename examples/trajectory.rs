@@ -1,8 +1,12 @@
 /// Commander example that demonstrates starting a predefined trajectory.
 ///
-/// NOTE: This assumes a trajectory has already been uploaded to the Crazyflie’s
+/// NOTE: This assumes a trajectory has already been uploaded to the Crazyflie's
 /// trajectory memory at `MEMORY_OFFSET` with `PIECE_COUNT` pieces.
 /// The Rust memory upload subsystem is not implemented yet.
+///
+/// Unlike other high-level commander methods, `start_trajectory` is non-blocking
+/// because the trajectory duration is determined by the uploaded data, which the
+/// library doesn't currently have access to. Users must manually sleep for the expected duration.
 
 
 use crazyflie_link::LinkContext;
@@ -21,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = LinkContext::new();
     let crazyflie = Crazyflie::connect_from_uri(
         &context,
-        "radio://0/90/2M/F00D2BEFED",
+        "radio://0/80/2M/E7E7E7E7E7",
     )
     .await?;
 
@@ -38,7 +42,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Taking off...");
     crazyflie.high_level_commander.take_off(0.8, None, 2.0, None).await?;
-    sleep(Duration::from_secs(2)).await;
 
     println!("Starting trajectory...");
     if let Err(e) = crazyflie
@@ -54,7 +57,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = crazyflie.high_level_commander.land(0.0, None, 2.0, None).await {
         eprintln!("Land command failed: {e}");
     }
-    sleep(Duration::from_secs(2)).await;
 
     crazyflie.high_level_commander.stop(None).await?;
     println!("Done");

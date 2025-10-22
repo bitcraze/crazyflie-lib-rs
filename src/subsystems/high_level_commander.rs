@@ -6,6 +6,7 @@
 
 use crazyflie_link::Packet;
 use flume::Sender;
+use tokio::time::{sleep, Duration};
 
 use crate::{Error, Result};
 
@@ -43,7 +44,14 @@ pub const TRAJECTORY_TYPE_POLY4D_COMPRESSED: u8 = 1;
 /// This Rust type provides an asynchronous, remote client for that module:
 /// it builds and sends the required packets over the high-level commander port,
 /// exposing a small set of ergonomic methods. When using trajectory functions,
-/// ensure the trajectory data has been uploaded to the Crazyflie’s memory first.
+/// ensure the trajectory data has been uploaded to the Crazyflie's memory first.
+///
+/// # Command execution model
+/// Movement commands ([`take_off`](Self::take_off), [`land`](Self::land),
+/// [`go_to`](Self::go_to), [`spiral`](Self::spiral)) immediately trigger execution
+/// on the Crazyflie and then block for their `duration` to simplify command sequencing.
+/// The Crazyflie executes these commands autonomously—if the Rust future is cancelled
+/// or the connection drops, the drone will continue executing the command until completion.
 ///
 /// # Notes
 /// The high-level commander can be preempted at any time by setpoints from the commander.
@@ -55,22 +63,17 @@ pub const TRAJECTORY_TYPE_POLY4D_COMPRESSED: u8 = 1;
 /// ```no_run
 /// # use crazyflie_link::LinkContext;
 /// # use crazyflie_lib::Crazyflie;
-/// # use tokio::time::{sleep, Duration};
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// # let context = LinkContext::new();
 /// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/80/2M/E7E7E7E7E7").await?;
 /// // Continue flight sequence even if commands fail
-/// let take_off_duration = 2.0;
-/// if let Err(e) = cf.high_level_commander.take_off(0.5, None, take_off_duration, None).await {
+/// if let Err(e) = cf.high_level_commander.take_off(0.5, None, 2.0, None).await {
 ///     eprintln!("Take-off failed: {e}");
 /// }
-/// sleep(Duration::from_secs_f32(take_off_duration)).await;
 ///
-/// let land_duration = 2.0;
-/// if let Err(e) = cf.high_level_commander.land(0.0, None, land_duration, None).await {
+/// if let Err(e) = cf.high_level_commander.land(0.0, None, 2.0, None).await {
 ///     eprintln!("Landing failed: {e}");
 /// }
-/// sleep(Duration::from_secs_f32(land_duration)).await;
 /// # Ok(())
 /// # }
 /// ```
@@ -120,7 +123,7 @@ impl HighLevelCommander {
     /// # Arguments
     /// * `height` - Target height (meters) above the world origin.
     /// * `yaw` - Target yaw (radians). Use `None` to maintain the current yaw.
-    /// * `duration` - Time (seconds) to reach the target height.
+    /// * `duration` - Time (seconds) to reach the target height. This method blocks for this duration.
     /// * `group_mask` - Bitmask selecting which Crazyflies to command. Use `None` for all Crazyflies.
     pub async fn take_off(&self, height: f32, yaw: Option<f32>, duration: f32, group_mask: Option<u8>) -> Result<()> {
         let use_current_yaw = yaw.is_none();
@@ -142,6 +145,8 @@ impl HighLevelCommander {
             .send_async(pk)
             .await
            .map_err(|_| Error::Disconnected)?;
+
+        sleep(Duration::from_secs_f32(duration)).await;
         Ok(())
     }
 
@@ -150,7 +155,7 @@ impl HighLevelCommander {
     /// # Arguments
     /// * `height` - Target height (meters) above the world origin.
     /// * `yaw` - Target yaw (radians). Use `None` to maintain the current yaw.
-    /// * `duration` - Time (seconds) to reach the target height.
+    /// * `duration` - Time (seconds) to reach the target height. This method blocks for this duration.
     /// * `group_mask` - Bitmask selecting which Crazyflies to command. Use `None` for all Crazyflies.
     pub async fn land(&self, height: f32, yaw: Option<f32>, duration: f32, group_mask: Option<u8>) -> Result<()> {
         let use_current_yaw = yaw.is_none();
@@ -172,6 +177,8 @@ impl HighLevelCommander {
             .send_async(pk)
             .await
             .map_err(|_| Error::Disconnected)?;
+
+        sleep(Duration::from_secs_f32(duration)).await;
         Ok(())
     }
 
@@ -216,7 +223,7 @@ impl HighLevelCommander {
     /// * `y` - Target y-position in meters
     /// * `z` - Target z-position in meters
     /// * `yaw` - Target yaw angle in radians
-    /// * `duration` - Time in seconds to reach the target position
+    /// * `duration` - Time in seconds to reach the target position. This method blocks for this duration.
     /// * `relative` - If `true`, positions and yaw are relative to current position; if `false`, absolute
     /// * `linear` - If `true`, use linear interpolation; if `false`, use polynomial trajectory
     /// * `group_mask` - Bitmask selecting which Crazyflies to command. Use `None` for all Crazyflies.
@@ -240,6 +247,8 @@ impl HighLevelCommander {
             .send_async(pk)
             .await
             .map_err(|_| Error::Disconnected)?;
+
+        sleep(Duration::from_secs_f32(duration)).await;
         Ok(())
     }
 
@@ -281,7 +290,7 @@ impl HighLevelCommander {
     /// * `final_radius` - Ending radius in meters (≥ 0).
     /// * `altitude_gain` - Vertical displacement in meters (positive = climb,
     ///   negative = descent).
-    /// * `duration` - Time in seconds to complete the spiral.
+    /// * `duration` - Time in seconds to complete the spiral. This method blocks for this duration.
     /// * `sideways` - If `true`, heading points toward the spiral center;
     ///   if `false`, heading follows the spiral tangent.
     /// * `clockwise` - If `true`, fly clockwise; otherwise counter-clockwise.
@@ -321,6 +330,8 @@ impl HighLevelCommander {
             .send_async(pk)
             .await
             .map_err(|_| Error::Disconnected)?;
+
+        sleep(Duration::from_secs_f32(duration)).await;
         Ok(())
     }
 }
