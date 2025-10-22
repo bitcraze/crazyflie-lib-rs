@@ -1,5 +1,6 @@
 use crate::subsystems::commander::Commander;
 use crate::subsystems::console::Console;
+use crate::subsystems::localization::Localization;
 use crate::subsystems::log::Log;
 use crate::subsystems::param::Param;
 
@@ -21,8 +22,8 @@ pub(crate) const PARAM_PORT: u8 = 2;
 pub(crate) const COMMANDER_PORT: u8 = 3;
 pub(crate) const _MEMORY_PORT: u8 = 4;
 pub(crate) const LOG_PORT: u8 = 5;
-pub(crate) const _LOCALIZATION_PORT: u8 = 6;
-pub(crate) const _GENERIC_SETPOINT_PORT: u8 = 7;
+pub(crate) const LOCALIZATION_PORT: u8 = 6;
+pub(crate) const GENERIC_SETPOINT_PORT: u8 = 7;
 pub(crate) const PLATFORM_PORT: u8 = 13;
 pub(crate) const _LINK_PORT: u8 = 15;
 
@@ -42,6 +43,8 @@ pub struct Crazyflie {
     pub commander: Commander,
     /// Console subsystem access
     pub console: Console,
+    /// Localization services
+    pub localization: Localization,
     /// Platform services
     pub platform: Platform,
     uplink_task: Mutex<Option<JoinHandle<()>>>,
@@ -111,6 +114,7 @@ impl Crazyflie {
         let log_downlink = dispatcher.get_port_receiver(LOG_PORT).unwrap();
         let param_downlink = dispatcher.get_port_receiver(PARAM_PORT).unwrap();
         let console_downlink = dispatcher.get_port_receiver(CONSOLE_PORT).unwrap();
+        let localization_downlink = dispatcher.get_port_receiver(LOCALIZATION_PORT).unwrap();
 
         // Start the downlink packet dispatcher
         let dispatch_task = dispatcher.run().await?;
@@ -134,6 +138,7 @@ impl Crazyflie {
 
         let commander = Commander::new(uplink.clone());
         let console = Console::new(console_downlink).await?;
+        let localization = Localization::new(uplink.clone(), localization_downlink);
 
         // Initialize async modules in parallel
         let (log, param) = futures::join!(log_future, param_future);
@@ -143,6 +148,7 @@ impl Crazyflie {
             param: param?,
             commander,
             console,
+            localization,
             platform,
             uplink_task: Mutex::new(Some(uplink_task)),
             dispatch_task: Mutex::new(Some(dispatch_task)),
