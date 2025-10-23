@@ -1,4 +1,5 @@
 use crate::subsystems::commander::Commander;
+use crate::subsystems::high_level_commander::HighLevelCommander;
 use crate::subsystems::console::Console;
 use crate::subsystems::localization::Localization;
 use crate::subsystems::log::Log;
@@ -25,6 +26,7 @@ pub(crate) const MEMORY_PORT: u8 = 4;
 pub(crate) const LOG_PORT: u8 = 5;
 pub(crate) const LOCALIZATION_PORT: u8 = 6;
 pub(crate) const GENERIC_SETPOINT_PORT: u8 = 7;
+pub(crate) const HL_COMMANDER_PORT: u8 = 8;
 pub(crate) const PLATFORM_PORT: u8 = 13;
 pub(crate) const _LINK_PORT: u8 = 15;
 
@@ -44,6 +46,8 @@ pub struct Crazyflie {
     pub memory: Memory,
     /// Commander/setpoint subsystem access
     pub commander: Commander,
+    /// High-level commander subsystem access
+    pub high_level_commander: HighLevelCommander,
     /// Console subsystem access
     pub console: Console,
     /// Localization services
@@ -142,6 +146,7 @@ impl Crazyflie {
         let memory_future = Memory::new(memory_downlink, uplink.clone());
 
         let commander = Commander::new(uplink.clone());
+        let high_level_commander = HighLevelCommander::new(uplink.clone());
         let console = Console::new(console_downlink).await?;
         let localization = Localization::new(uplink.clone(), localization_downlink);
 
@@ -153,6 +158,7 @@ impl Crazyflie {
             param: param?,
             memory: memory?,
             commander,
+            high_level_commander,
             console,
             localization,
             platform,

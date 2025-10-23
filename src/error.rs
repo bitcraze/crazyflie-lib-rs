@@ -31,6 +31,9 @@ pub enum Error {
     SystemError(String),
     /// App channel packets should be no larger than [APPCHANNEL_MTU](crate::subsystems::platform::APPCHANNEL_MTU)
     AppchannelPacketTooLarge,
+    /// Invalid argument passed to a function.
+    /// This error indicates that one or more arguments provided to a function are invalid.
+    InvalidArgument(String),
     /// Operation timed out waiting for response.
     Timeout,
     /// Memory content malformed or not as expected. The String contains the reason.
@@ -41,7 +44,20 @@ pub enum Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("Foo {}", self))
+        match self {
+            Error::ProtocolVersionNotSupported => write!(f, "Protocol version not supported"),
+            Error::ProtocolError(msg) => write!(f, "Protocol error: {}", msg),
+            Error::ParamError(msg) => write!(f, "Parameter error: {}", msg),
+            Error::LogError(msg) => write!(f, "Log error: {}", msg),
+            Error::ConversionError(msg) => write!(f, "Conversion error: {}", msg),
+            Error::LinkError(e) => write!(f, "Link error: {}", e),
+            Error::Disconnected => write!(f, "Disconnected"),
+            Error::VariableNotFound => write!(f, "Variable not found"),
+            Error::SystemError(msg) => write!(f, "System error: {}", msg),
+            Error::AppchannelPacketTooLarge => write!(f, "Appchannel packet too large"),
+            Error::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
+            Error::Timeout => write!(f, "Operation timed out"),
+        }
     }
 }
 

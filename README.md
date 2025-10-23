@@ -13,7 +13,7 @@ The following subsystems are or need to be implemented:
    - [x] Basic Roll Pitch Yaw setpoint
    - [x] Generic setpoints
  - [x] Console
- - [ ] High-level commander
+ - [x] High-level commander
  - [x] Localization
  - [x] Log subsystem
  - [ ] Memory subsystem
