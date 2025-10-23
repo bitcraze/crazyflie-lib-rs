@@ -1,6 +1,6 @@
 [package]
 name = "crazyflie-lib"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Arnaud Taffanel <arnaud@bitcraze.io>"]
 edition = "2018"
 description = "Crazyflie quadcopter control lib"
@@ -18,14 +18,14 @@ crazyflie-link = "0.3.0"
 futures-util = "0.3.31"
 futures = "0.3.31"
 async-stream = "0.3.6"
-flume = "0.11.0"
-async-trait = "0.1.50"
-num_enum = "0.7.3"
-half = "2.4.1"
+flume = "0.11.1"
+async-trait = "0.1.89"
+num_enum = "0.7.5"
+half = "2.7.1"
 async-broadcast = "0.7.1"
-tokio = { version = "1.36.0", features = ["full"] }
+tokio = { version = "1.48.0", features = ["full"] }
 crc32fast = "1.5.0"
 hex = "0.4.3"
 
 [dev-dependencies]
-env_logger = "0.11.5"
+env_logger = "0.11.8"
