@@ -77,10 +77,14 @@ impl Console {
     pub(crate) async fn new(
         downlink: channel::Receiver<Packet>,
     ) -> Result<Self> {
-        let (stream_broadcast, stream_broadcast_receiver) = broadcast(1000);
+        let (mut stream_broadcast, stream_broadcast_receiver) = broadcast(1000);
         let console_buffer: Arc<Mutex<String>> = Default::default();
 
-        let (line_broadcast, line_broadcast_receiver) = broadcast(1000);
+        let (mut line_broadcast, line_broadcast_receiver) = broadcast(1000);
+
+        // Enable overflow mode so old messages are dropped instead of blocking
+        stream_broadcast.set_overflow(true);
+        line_broadcast.set_overflow(true);
         let console_lines: Arc<Mutex<Vec<String>>> = Default::default();
 
         let buffer = console_buffer.clone();
