@@ -57,6 +57,8 @@ impl std::fmt::Display for Error {
             Error::AppchannelPacketTooLarge => write!(f, "Appchannel packet too large"),
             Error::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
             Error::Timeout => write!(f, "Operation timed out"),
+            Error::MemoryError(msg) => write!(f, "Memory error: {}", msg),
+            Error::InvalidParameter(msg) => write!(f, "Invalid parameter: {}", msg),
         }
     }
 }
