@@ -36,13 +36,13 @@ use flume::Sender;
 use crate::{Error, Result};
 
 use crate::crazyflie::COMMANDER_PORT;
-use crate::crazyflie::_GENERIC_SETPOINT_PORT;
+use crate::crazyflie::GENERIC_SETPOINT_PORT;
 
 
 // Channels
 const RPYT_CHANNEL: u8 = 0;
-const _GENERIC_SETPOINT_CHANNEL: u8 = 0;
-const _GENERIC_CMD_CHANNEL: u8 = 1;
+const GENERIC_SETPOINT_CHANNEL: u8 = 0;
+const GENERIC_CMD_CHANNEL: u8 = 1;
 
 // Setpoint type identifiers
 const TYPE_POSITION: u8 = 7;
@@ -129,7 +129,7 @@ impl Commander {
         payload.extend_from_slice(&y.to_le_bytes());
         payload.extend_from_slice(&z.to_le_bytes());
         payload.extend_from_slice(&yaw.to_le_bytes());
-        let pk = Packet::new(_GENERIC_SETPOINT_PORT, _GENERIC_SETPOINT_CHANNEL, payload);
+        let pk = Packet::new(GENERIC_SETPOINT_PORT, GENERIC_SETPOINT_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }
@@ -148,7 +148,7 @@ impl Commander {
         payload.extend_from_slice(&vy.to_le_bytes());
         payload.extend_from_slice(&vz.to_le_bytes());
         payload.extend_from_slice(&yawrate.to_le_bytes());
-        let pk = Packet::new(_GENERIC_SETPOINT_PORT, _GENERIC_SETPOINT_CHANNEL, payload);
+        let pk = Packet::new(GENERIC_SETPOINT_PORT, GENERIC_SETPOINT_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }
@@ -167,7 +167,7 @@ impl Commander {
         payload.extend_from_slice(&pitch.to_le_bytes());
         payload.extend_from_slice(&yawrate.to_le_bytes());
         payload.extend_from_slice(&zdistance.to_le_bytes());
-        let pk = Packet::new(_GENERIC_SETPOINT_PORT, _GENERIC_SETPOINT_CHANNEL, payload);
+        let pk = Packet::new(GENERIC_SETPOINT_PORT, GENERIC_SETPOINT_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }
@@ -186,7 +186,7 @@ impl Commander {
         payload.extend_from_slice(&vy.to_le_bytes());
         payload.extend_from_slice(&yawrate.to_le_bytes());
         payload.extend_from_slice(&zdistance.to_le_bytes());
-        let pk = Packet::new(_GENERIC_SETPOINT_PORT, _GENERIC_SETPOINT_CHANNEL, payload);
+        let pk = Packet::new(GENERIC_SETPOINT_PORT, GENERIC_SETPOINT_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }
@@ -212,7 +212,7 @@ impl Commander {
         payload.extend_from_slice(&yawrate.to_le_bytes());
         payload.extend_from_slice(&thrust_16.to_le_bytes());
         payload.push(rate as u8);
-        let pk = Packet::new(_GENERIC_SETPOINT_PORT, _GENERIC_SETPOINT_CHANNEL, payload);
+        let pk = Packet::new(GENERIC_SETPOINT_PORT, GENERIC_SETPOINT_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }
@@ -220,7 +220,7 @@ impl Commander {
     /// Sends a STOP setpoint, immediately stopping the motors. The Crazyflie will lose lift and may fall.
     pub async fn setpoint_stop(&self) -> Result<()> {
         let payload = vec![TYPE_STOP];
-        let pk = Packet::new(_GENERIC_SETPOINT_PORT, _GENERIC_SETPOINT_CHANNEL, payload);
+        let pk = Packet::new(GENERIC_SETPOINT_PORT, GENERIC_SETPOINT_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }
@@ -249,7 +249,7 @@ impl Commander {
         let mut payload = Vec::with_capacity(1 + 4);
         payload.push(TYPE_META_COMMAND_NOTIFY_SETPOINT_STOP);
         payload.extend_from_slice(&remain_valid_milliseconds.to_le_bytes());
-        let pk = Packet::new(_GENERIC_SETPOINT_PORT, _GENERIC_CMD_CHANNEL, payload);
+        let pk = Packet::new(GENERIC_SETPOINT_PORT, GENERIC_CMD_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }

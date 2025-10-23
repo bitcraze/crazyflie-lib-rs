@@ -34,6 +34,8 @@ pub enum Error {
     /// Invalid argument passed to a function.
     /// This error indicates that one or more arguments provided to a function are invalid.
     InvalidArgument(String),
+    /// Operation timed out waiting for response.
+    Timeout,
 }
 
 impl std::fmt::Display for Error {

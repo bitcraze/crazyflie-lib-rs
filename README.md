@@ -8,13 +8,13 @@ to implement a clone of the Crazyflie client's [flight tab].
 
 The following subsystems are or need to be implemented:
 
- - [ ] App channel
+ - [x] App channel
  - [x] Commander
    - [x] Basic Roll Pitch Yaw setpoint
    - [x] Generic setpoints
  - [x] Console
  - [x] High-level commander
- - [ ] Localization
+ - [x] Localization
  - [x] Log subsystem
  - [ ] Memory subsystem
  - [x] Param subsystem
