@@ -51,6 +51,7 @@ impl CrtpDispatch {
     pub async fn run(self) -> Result<JoinHandle<()>> {
         let link = self.link.clone();
         Ok(tokio::spawn(async move {
+                let _ = &self;
                 while !self.disconnect.load(Relaxed) {                  
                     match tokio::time::timeout(Duration::from_millis(200), link.recv_packet())
                         .await
