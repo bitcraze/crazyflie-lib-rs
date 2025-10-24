@@ -2,7 +2,7 @@
 name = "crazyflie-lib"
 version = "0.3.0"
 authors = ["Arnaud Taffanel <arnaud@bitcraze.io>"]
-edition = "2021"
+edition = "2024"
 description = "Crazyflie quadcopter control lib"
 readme = "README.md"
 repository = "https://github.com/bitcraze/crazyflie-lib-rs"

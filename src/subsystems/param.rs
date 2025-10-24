@@ -377,7 +377,7 @@ impl Param {
     ///    has been set.
     ///  - Or it can be a parameter change in the Crazyflie itself. The Crazyflie
     ///    will send notification packet for every internal parameter change.
-    pub async fn watch_change(&self) -> impl futures::Stream<Item = (String, Value)> {
+    pub async fn watch_change(&self) -> impl futures::Stream<Item = (String, Value)> + use<> {
         let (tx, rx) = futures::channel::mpsc::unbounded();
 
         let mut watchers = self.watchers.lock().await;
