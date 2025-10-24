@@ -376,7 +376,7 @@ impl Lighthouse {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn angle_stream(&self) -> impl Stream<Item = LighthouseAngleData> {
+    pub async fn angle_stream(&self) -> impl Stream<Item = LighthouseAngleData> + use<> {
         self.angle_stream_receiver.clone()
     }
 

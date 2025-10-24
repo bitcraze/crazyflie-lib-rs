@@ -127,10 +127,10 @@ impl Platform {
     pub async fn get_app_channel(
         &self,
     ) -> Option<(
-        impl Sink<AppChannelPacket>,
-        impl Stream<Item = AppChannelPacket>,
+        impl Sink<AppChannelPacket> + use<>,
+        impl Stream<Item = AppChannelPacket> + use<>,
     )> {
-        if let Some((tx, rx)) = self.appchannel_comm.lock().await.take() {
+        match self.appchannel_comm.lock().await.take() { Some((tx, rx)) => {
             // let all_rx = ;
 
             let app_tx = Box::pin(tx.into_sink().with_flat_map(|app_pk: AppChannelPacket| {
@@ -143,9 +143,9 @@ impl Platform {
                 .boxed();
 
             Some((app_tx, app_rx))
-        } else {
+        } _ => {
             None
-        }
+        }}
     }
 
     /// Set radio in continious wave mode
@@ -272,7 +272,7 @@ impl From<AppChannelPacket> for Vec<u8> {
 // This would be much better as a contrained const generic but
 // it does not seems to be possible at the moment
 macro_rules! from_impl {
-    ($n:expr) => {
+    ($n:expr_2021) => {
         impl From<[u8; $n]> for AppChannelPacket {
             fn from(v: [u8; $n]) -> Self {
                 AppChannelPacket(v.to_vec())
