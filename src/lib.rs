@@ -47,7 +47,11 @@
 //! let found = link_context.scan([0xE7; 5]).await?;
 //!
 //! if let Some(uri) = found.first() {
-//!     let cf = crazyflie_lib::Crazyflie::connect_from_uri(&link_context, uri).await?;
+//!     let cf = crazyflie_lib::Crazyflie::connect_from_uri(
+//!         &link_context,
+//!         uri,
+//!         crazyflie_lib::NoTocCache
+//!     ).await?;
 //!
 //!     println!("List of params variables: ");
 //!     for name in cf.param.names() {
@@ -79,6 +83,8 @@ pub mod subsystems;
 pub use crate::crazyflie::Crazyflie;
 pub use crate::error::{Error, Result};
 pub use crate::value::{Value, ValueType};
+pub use crate::crtp_utils::TocCache;
+pub use crate::crtp_utils::NoTocCache;
 
 /// Supported protocol version
 ///

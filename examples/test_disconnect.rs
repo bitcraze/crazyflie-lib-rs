@@ -13,6 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cf = Crazyflie::connect_from_uri(
         &context,
         "radio://0/20/2M/E7E7E7E7E7",
+        crazyflie_lib::NoTocCache
     )
     .await?;
     let cf = Arc::new(cf);
@@ -36,6 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cf = Crazyflie::connect_from_uri(
         &context,
         "radio://0/60/2M/E7E7E7E7E7",
+        crazyflie_lib::NoTocCache
     )
     .await;
 
@@ -49,6 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _cf = Crazyflie::connect_from_uri(
         &context,
         "radio://0/60/2M/E7E7E7E7E7",
+        crazyflie_lib::NoTocCache
     )
     .await;
 

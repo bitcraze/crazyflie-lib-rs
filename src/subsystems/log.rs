@@ -11,7 +11,11 @@
 //! # use crazyflie_link::LinkContext;
 //! # async fn example() -> Result<(), Error> {
 //! # let context = LinkContext::new();
-//! # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await?;
+//! # let cf = Crazyflie::connect_from_uri(
+//! #   &context,
+//! #   "radio://0/60/2M/E7E7E7E7E7",
+//! #   crazyflie_lib::NoTocCache
+//! # ).await?;
 //! // Create the log block
 //! let mut block = cf.log.create_block().await?;
 //!
@@ -32,11 +36,12 @@
 //! # };
 //! ```
 
-use crate::crtp_utils::WaitForPacket;
+use crate::crtp_utils::{TocCache, WaitForPacket};
 use crate::{Error, Result, Value, ValueType};
 use crazyflie_link::Packet;
 use flume as channel;
 use futures::lock::Mutex;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Weak;
@@ -73,14 +78,18 @@ const CREATE_BLOCK_V2: u8 = 6;
 const APPEND_BLOCK_V2: u8 = 7;
 
 impl Log {
-    pub(crate) async fn new(
+    pub(crate) async fn new<T>(
         downlink: channel::Receiver<Packet>,
         uplink: channel::Sender<Packet>,
-    ) -> Result<Self> {
+        toc_cache: Arc<Mutex<T>>
+    ) -> Result<Self>
+    where
+        T: TocCache + Send + Sync + 'static,
+    {
         let (toc_downlink, control_downlink, data_downlink, _) =
             crate::crtp_utils::crtp_channel_dispatcher(downlink);
 
-        let toc = crate::crtp_utils::fetch_toc(LOG_PORT, uplink.clone(), toc_downlink).await?;
+        let toc = crate::crtp_utils::fetch_toc(LOG_PORT, uplink.clone(), toc_downlink, toc_cache).await?;
         let toc = Arc::new(toc);
 
         let control_downlink = Arc::new(Mutex::new(control_downlink));
@@ -268,7 +277,7 @@ impl Log {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 struct LogItemInfo {
     item_type: ValueType,
 }

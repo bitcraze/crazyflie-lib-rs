@@ -4,7 +4,7 @@ const URI: &str = "radio://0/80/2M/E7E7E7E7E7";
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let link_context = crazyflie_link::LinkContext::new();
-    let cf = crazyflie_lib::Crazyflie::connect_from_uri(&link_context, URI).await?;
+    let cf = crazyflie_lib::Crazyflie::connect_from_uri(&link_context, URI, crazyflie_lib::NoTocCache).await?;
 
     println!("{: <2} | {: <20} | {: <6}", "ID", "Name", "Size");
     println!("{0:-<2}-|-{0:-<20}-|-{0:-<6}-", "");

@@ -9,6 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cf = Crazyflie::connect_from_uri(
         &context,
         "radio://0/80/2M/E7E7E7E7E7",
+        crazyflie_lib::NoTocCache
     )
     .await?;
 

@@ -6,7 +6,7 @@ use crate::subsystems::log::Log;
 use crate::subsystems::memory::Memory;
 use crate::subsystems::param::Param;
 
-use crate::crtp_utils::CrtpDispatch;
+use crate::crtp_utils::{CrtpDispatch, TocCache};
 use crate::subsystems::platform::Platform;
 use crate::{Error, Result};
 use crate::SUPPORTED_PROTOCOL_VERSION;
@@ -57,7 +57,7 @@ pub struct Crazyflie {
     uplink_task: Mutex<Option<JoinHandle<()>>>,
     dispatch_task: Mutex<Option<JoinHandle<()>>>,
     disconnect: Arc<AtomicBool>,
-    link: Arc<crazyflie_link::Connection>,
+    link: Arc<crazyflie_link::Connection>
 }
 
 impl Crazyflie {
@@ -69,13 +69,17 @@ impl Crazyflie {
     /// [crate root documentation](crate).
     ///
     /// An error is returned either if the link cannot be opened or if the Crazyflie connection fails.
-    pub async fn connect_from_uri(
+    pub async fn connect_from_uri<T>(
         link_context: &crazyflie_link::LinkContext,
         uri: &str,
-    ) -> Result<Self> {
+        toc_cache: T,
+    ) -> Result<Self>
+    where
+        T: TocCache + Send + Sync + 'static,
+    {
         let link = link_context.open_link(uri).await?;
 
-        Self::connect_from_link(link).await
+        Self::connect_from_link(link, toc_cache).await
     }
 
     /// Connect a Crazyflie using an existing link
@@ -86,9 +90,13 @@ impl Crazyflie {
     /// [crate root documentation](crate).
     ///
     /// This function will return an error if anything goes wrong in the connection process.
-    pub async fn connect_from_link(
+    pub async fn connect_from_link<T>(
         link: crazyflie_link::Connection,
-    ) -> Result<Self> {
+        toc_cache: T,
+    ) -> Result<Self>
+    where
+        T: TocCache + Send + Sync + 'static,
+    {
         let disconnect = Arc::new(AtomicBool::new(false));
 
         // Downlink dispatcher
@@ -138,21 +146,22 @@ impl Crazyflie {
             return Err(Error::ProtocolVersionNotSupported);
         }
 
+        // Create the TOC cache
+        let toc_cache = Arc::new(Mutex::new(toc_cache));
+
         // Create subsystems one by one
         // The future is passed to join!() later down so that all modules initializes at the same time
         // The get_port_receiver calls are guaranteed to work if the same port is not used twice (any way to express that at compile time?)
-        let log_future = Log::new(log_downlink, uplink.clone());
-        let param_future = Param::new(param_downlink, uplink.clone());
+        let log_future = Log::new(log_downlink, uplink.clone(), toc_cache.clone());
+        let param_future = Param::new(param_downlink, uplink.clone(), toc_cache.clone());
         let memory_future = Memory::new(memory_downlink, uplink.clone());
 
         let commander = Commander::new(uplink.clone());
         let high_level_commander = HighLevelCommander::new(uplink.clone());
         let console = Console::new(console_downlink).await?;
         let localization = Localization::new(uplink.clone(), localization_downlink);
-
         // Initialize async modules in parallel
         let (log, param, memory) = futures::join!(log_future, param_future, memory_future);
-
         Ok(Crazyflie {
             log: log?,
             param: param?,

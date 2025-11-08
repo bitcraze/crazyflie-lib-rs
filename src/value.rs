@@ -1,4 +1,5 @@
 use half::f16;
+use serde::{Serialize, Deserialize};
 use std::convert::{TryFrom, TryInto};
 
 /// # Typed data value
@@ -23,7 +24,7 @@ use std::convert::{TryFrom, TryInto};
 /// # use crazyflie_lib::Value;
 /// let v:u32 = Value::U8(42).try_into().unwrap();
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Value {
     /// [u8] value
     U8(u8),
@@ -52,7 +53,7 @@ pub enum Value {
 /// # Value type
 ///
 /// This enum contains all the possible type of a [Value]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ValueType {
     /// Type of a [u8] value
     U8,

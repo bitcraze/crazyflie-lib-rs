@@ -5,7 +5,7 @@ const URI: &str = "radio://0/60/2M/E7E7E7E7E7";
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let link_context = crazyflie_link::LinkContext::new();
     let cf =
-        crazyflie_lib::Crazyflie::connect_from_uri(&link_context, URI)
+        crazyflie_lib::Crazyflie::connect_from_uri(&link_context, URI, crazyflie_lib::NoTocCache)
             .await?;
 
     println!("{: <30} | {: <6} | {: <6}", "Name", "Access", "Value");

@@ -65,7 +65,11 @@ pub const TRAJECTORY_TYPE_POLY4D_COMPRESSED: u8 = 1;
 /// # use crazyflie_lib::Crazyflie;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// # let context = LinkContext::new();
-/// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/80/2M/E7E7E7E7E7").await?;
+/// # let cf = Crazyflie::connect_from_uri(
+/// #   &context,
+/// #   "radio://0/80/2M/E7E7E7E7E7",
+/// #   crazyflie_lib::NoTocCache
+/// # ).await?;
 /// // Continue flight sequence even if commands fail
 /// if let Err(e) = cf.high_level_commander.take_off(0.5, None, 2.0, None).await {
 ///     eprintln!("Take-off failed: {e}");
