@@ -306,11 +306,9 @@ impl Param {
     where
         <T as TryFrom<Value>>::Error: std::fmt::Debug,
     {
-        let value = *self
-            .values
-            .lock()
-            .await
-            .get(name)
+        let mut values = self.values.lock().await;
+        
+        let value = *values.get(name)
             .ok_or_else(|| not_found(name))?;
 
         // If the value is None it means it has never been read, read it now and update the value
@@ -323,7 +321,7 @@ impl Param {
                     .ok_or_else(|| not_found(name))?;
                 let v = self.read_value(*param_id, param_info.item_type).await?;
                 // Update the cache
-                *self.values.lock().await.get_mut(name).unwrap() = Some(v.clone());
+                *values.get_mut(name).unwrap() = Some(v.clone());
                 v
             }
         };
