@@ -81,7 +81,7 @@ impl Log {
     pub(crate) async fn new<T>(
         downlink: channel::Receiver<Packet>,
         uplink: channel::Sender<Packet>,
-        toc_cache: Arc<Mutex<T>>
+        toc_cache: Arc<Mutex<T>>,
     ) -> Result<Self>
     where
         T: TocCache + Send + Sync + 'static,

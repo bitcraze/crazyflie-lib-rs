@@ -57,7 +57,7 @@ pub struct Crazyflie {
     uplink_task: Mutex<Option<JoinHandle<()>>>,
     dispatch_task: Mutex<Option<JoinHandle<()>>>,
     disconnect: Arc<AtomicBool>,
-    link: Arc<crazyflie_link::Connection>
+    link: Arc<crazyflie_link::Connection>,
 }
 
 impl Crazyflie {

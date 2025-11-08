@@ -2,29 +2,29 @@
 /// and measuring connection times with and without TOC caching.
 use crazyflie_lib::{Crazyflie, TocCache};
 use crazyflie_link::LinkContext;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, sync::Mutex};
 use tokio::time::{sleep, Duration};
 
 #[derive(Clone)]
 struct InMemoryTocCache {
-  toc: Arc<tokio::sync::Mutex<HashMap<u32, String>>>,
+  toc: Arc<Mutex<HashMap<u32, String>>>,
 }
 
 impl InMemoryTocCache {
   fn new() -> Self {
     InMemoryTocCache {
-      toc: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+      toc: Arc::new(Mutex::new(HashMap::new())),
     }
   }
 }
 
 impl TocCache for InMemoryTocCache {
   fn get_toc(&self, crc32: u32) -> Option<String> {
-    self.toc.try_lock().ok()?.get(&crc32).cloned()
+    self.toc.lock().ok()?.get(&crc32).cloned()
   }
 
   fn store_toc(&mut self, crc32: u32, toc: &str) {
-    if let Ok(mut lock) = self.toc.try_lock() {
+    if let Ok(mut lock) = self.toc.lock() {
       lock.insert(crc32, toc.to_string());
     }
   }
@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "radio://0/80/2M/E7E7E7E7E7",
         toc_cache.clone()
     )
-    .await;
+    .await?;
 
     println!(" {:?}", start.elapsed());
     drop(cf);
@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "radio://0/80/2M/E7E7E7E7E7",
         toc_cache.clone()
     )
-    .await;
+    .await?;
 
     println!(" {:?}", start.elapsed());
 

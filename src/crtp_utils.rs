@@ -127,8 +127,8 @@ where
     let mut toc = std::collections::BTreeMap::new();
 
     if let Some(toc_str) = toc_cache.lock().await.get_toc(toc_crc32) {
-      toc = serde_json::from_str(&toc_str).map_err(|e| Error::InvalidParameter(format!("Failed to deserialize TOC cache: {}", e)))?;
-      return Ok(toc);
+        toc = serde_json::from_str(&toc_str).map_err(|e| Error::InvalidParameter(format!("Failed to deserialize TOC cache: {}", e)))?;
+        return Ok(toc);
     }
 
     for i in 0..toc_len {
@@ -153,8 +153,8 @@ where
         toc.insert(format!("{}.{}", group, name), (id, item_type));
     }
 
-      let toc_str = serde_json::to_string(&toc).map_err(|e| Error::InvalidParameter(format!("Failed to serialize TOC: {}", e)))?;
-      toc_cache.lock().await.store_toc(toc_crc32, &toc_str);
+    let toc_str = serde_json::to_string(&toc).map_err(|e| Error::InvalidParameter(format!("Failed to serialize TOC: {}", e)))?;
+    toc_cache.lock().await.store_toc(toc_crc32, &toc_str);
 
     Ok(toc)
 }
