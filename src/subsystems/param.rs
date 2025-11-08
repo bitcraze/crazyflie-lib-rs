@@ -74,7 +74,7 @@ pub struct Param {
     read_downlink: channel::Receiver<Packet>,
     write_downlink: Mutex<channel::Receiver<Packet>>,
     toc: Arc<BTreeMap<String, (u16, ParamItemInfo)>>,
-    values: Arc<Mutex<HashMap<String, Value>>>,
+    values: Arc<Mutex<HashMap<String, Option<Value>>>>,
     watchers: ParamChangeWatchers,
 }
 
@@ -105,19 +105,19 @@ impl Param {
             watchers: Arc::default(),
         };
 
-        param.update_values().await?;
+        param.initialize_values().await?;
 
         param.spawn_misc_loop(misc_downlink).await;
 
         Ok(param)
     }
 
-    async fn update_values(&mut self) -> Result<()> {
-        for (name, (param_id, info)) in self.toc.as_ref() {
+    async fn initialize_values(&mut self) -> Result<()> {
+        for (name, (_param_id, _info)) in self.toc.as_ref() {
             let mut values = self.values.lock().await;
             values.insert(
                 name.into(),
-                self.read_value(*param_id, info.item_type).await?,
+                None,
             );
         }
 
@@ -160,7 +160,7 @@ impl Param {
                         Value::from_le_bytes(&pk.get_data()[3..], item_info.item_type)
                     {
                         // The param is tested as being in the toc so this unwrap cannot fail.
-                        *values.lock().await.get_mut(param).unwrap() = value;
+                        *values.lock().await.get_mut(param).unwrap() = Some(value);
                     } else {
                         println!("Warning: Malformed param update");
                     }
@@ -262,7 +262,7 @@ impl Param {
 
         if echoed_bytes == expected_bytes.as_slice() {
             // The param is tested as being in the TOC so this unwrap cannot fail
-            *self.values.lock().await.get_mut(param).unwrap() = value;
+            *self.values.lock().await.get_mut(param).unwrap() = Some(value);
             self.notify_watchers(param, value).await;
             Ok(())
         } else {
@@ -312,6 +312,21 @@ impl Param {
             .await
             .get(name)
             .ok_or_else(|| not_found(name))?;
+
+        // If the value is None it means it has never been read, read it now and update the value
+        let value = match value {
+            Some(v) => v,
+            None => {
+                let (param_id, param_info) = self
+                    .toc
+                    .get(name)
+                    .ok_or_else(|| not_found(name))?;
+                let v = self.read_value(*param_id, param_info.item_type).await?;
+                // Update the cache
+                *self.values.lock().await.get_mut(name).unwrap() = Some(v.clone());
+                v
+            }
+        };
 
         Ok(value
             .try_into()
