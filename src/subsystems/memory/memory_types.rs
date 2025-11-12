@@ -8,7 +8,7 @@ use crate::crazyflie::MEMORY_PORT;
 const READ_CHANNEL: u8 = 1;
 const WRITE_CHANNEL: u8 = 2;
 
-const MEM_MAX_REQUEST_SIZE: usize = 20;
+const MEM_MAX_REQUEST_SIZE: usize = 24;
 
 
 /// Description of a memory in the Crazyflie
