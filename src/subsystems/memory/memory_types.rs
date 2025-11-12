@@ -35,7 +35,10 @@ pub struct MemoryDevice {
 }
 
 impl MemoryBackend {
-    pub(crate) async fn read(&self, address: usize, length: usize) -> Result<Vec<u8>> {
+    pub(crate) async fn read<F>(&self, address: usize, length: usize, mut progress_callback: Option<F>) -> Result<Vec<u8>>
+    where
+        F: FnMut(usize, usize),
+    {
         let mut data = vec![0; length];
         let mut current_address = address;
         while current_address < address + length {
@@ -83,12 +86,20 @@ impl MemoryBackend {
             }
 
             current_address += to_read;
+
+            if let Some(ref mut callback) = progress_callback {
+                callback(current_address- address, length);
+            }
+            
         }
 
         Ok(data)
     }
 
-    pub(crate) async fn write(&self, address: usize, data: &[u8]) -> Result<()> {
+    pub(crate) async fn write<F>(&self, address: usize, data: &[u8], mut progress_callback: Option<F>) -> Result<()>
+    where
+        F: FnMut(usize, usize),
+    {
         let mut current_address = address;
         let length = data.len();
         while current_address < address + length {
@@ -110,6 +121,10 @@ impl MemoryBackend {
                 .map_err(|_| Error::Disconnected)
                 .ok();
             current_address += to_write;
+
+            if let Some(ref mut callback) = progress_callback {
+                callback(current_address - address, length);
+            }
 
             let _pk = self
                 .write_downlink
