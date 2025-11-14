@@ -8,8 +8,9 @@
 //! Functions that accesses variables, take a `name` parameter that accepts a string
 //! in the format "group.variable"
 //!
-//! During connection, the full param table of content is downloaded form the
-//! Crazyflie as well as the values of all the variable. If a variable value
+//! During connection, the full param table of content is downloaded from the
+//! Crazyflie. Parameter values are loaded on-demand when first accessed via `get()`.
+//! Parameters can also be set without reading them first. If a variable value
 //! is modified by the Crazyflie during runtime, it sends a packet with the new
 //! value which updates the local value cache.
 
@@ -76,7 +77,7 @@ pub struct Param {
     read_downlink: channel::Receiver<Packet>,
     write_downlink: Mutex<channel::Receiver<Packet>>,
     toc: Arc<BTreeMap<String, (u16, ParamItemInfo)>>,
-    values: Arc<Mutex<HashMap<String, Value>>>,
+    values: Arc<Mutex<HashMap<String, Option<Value>>>>,
     watchers: ParamChangeWatchers,
 }
 
@@ -111,19 +112,19 @@ impl Param {
             watchers: Arc::default(),
         };
 
-        param.update_values().await?;
+        param.initialize_values().await?;
 
         param.spawn_misc_loop(misc_downlink).await;
 
         Ok(param)
     }
 
-    async fn update_values(&mut self) -> Result<()> {
-        for (name, (param_id, info)) in self.toc.as_ref() {
+    async fn initialize_values(&mut self) -> Result<()> {
+        for (name, (_param_id, _info)) in self.toc.as_ref() {
             let mut values = self.values.lock().await;
             values.insert(
                 name.into(),
-                self.read_value(*param_id, info.item_type).await?,
+                None,
             );
         }
 
@@ -166,7 +167,7 @@ impl Param {
                         Value::from_le_bytes(&pk.get_data()[3..], item_info.item_type)
                     {
                         // The param is tested as being in the toc so this unwrap cannot fail.
-                        *values.lock().await.get_mut(param).unwrap() = value;
+                        *values.lock().await.get_mut(param).unwrap() = Some(value);
                     } else {
                         println!("Warning: Malformed param update");
                     }
@@ -272,7 +273,7 @@ impl Param {
 
         if echoed_bytes == expected_bytes.as_slice() {
             // The param is tested as being in the TOC so this unwrap cannot fail
-            *self.values.lock().await.get_mut(param).unwrap() = value;
+            *self.values.lock().await.get_mut(param).unwrap() = Some(value);
             self.notify_watchers(param, value).await;
             Ok(())
         } else {
@@ -292,8 +293,8 @@ impl Param {
 
     /// Get param value
     ///
-    /// Get value of a parameter. This function takes the value from a local
-    /// cache and so is quick.
+    /// Get value of a parameter. The first access will fetch the value from the
+    /// Crazyflie. Subsequent accesses are served from a local cache and are quick.
     ///
     /// Similarly to the `set` function above, the type of the param must match
     /// the return parameter. For example to get a u16 param:
@@ -320,12 +321,25 @@ impl Param {
     where
         <T as TryFrom<Value>>::Error: std::fmt::Debug,
     {
-        let value = *self
-            .values
-            .lock()
-            .await
-            .get(name)
+        let mut values = self.values.lock().await;
+        
+        let value = *values.get(name)
             .ok_or_else(|| not_found(name))?;
+
+        // If the value is None it means it has never been read, read it now and update the value
+        let value = match value {
+            Some(v) => v,
+            None => {
+                let (param_id, param_info) = self
+                    .toc
+                    .get(name)
+                    .ok_or_else(|| not_found(name))?;
+                let v = self.read_value(*param_id, param_info.item_type).await?;
+                // Update the cache
+                *values.get_mut(name).unwrap() = Some(v.clone());
+                v
+            }
+        };
 
         Ok(value
             .try_into()
