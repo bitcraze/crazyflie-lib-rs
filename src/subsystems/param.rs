@@ -92,10 +92,10 @@ impl Param {
     pub(crate) async fn new<T>(
         downlink: channel::Receiver<Packet>,
         uplink: channel::Sender<Packet>,
-        toc_cache: Arc<Mutex<T>>,
+        toc_cache: T,
     ) -> Result<Self>
     where
-        T: TocCache + Send + Sync + 'static,
+        T: TocCache,
     {
         let (toc_downlink, read_downlink, write_downlink, misc_downlink) =
             crate::crtp_utils::crtp_channel_dispatcher(downlink);

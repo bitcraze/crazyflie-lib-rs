@@ -146,9 +146,6 @@ impl Crazyflie {
             return Err(Error::ProtocolVersionNotSupported);
         }
 
-        // Create the TOC cache
-        let toc_cache = Arc::new(Mutex::new(toc_cache));
-
         // Create subsystems one by one
         // The future is passed to join!() later down so that all modules initializes at the same time
         // The get_port_receiver calls are guaranteed to work if the same port is not used twice (any way to express that at compile time?)
