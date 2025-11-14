@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use crazyflie_link::Packet;
 use flume as channel;
 use flume::{Receiver, Sender};
-use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 use std::collections::BTreeMap;
@@ -107,10 +106,10 @@ pub(crate) async fn fetch_toc<C, T, E>(
     port: u8,
     uplink: channel::Sender<Packet>,
     downlink: channel::Receiver<Packet>,
-    toc_cache: Arc<Mutex<C>>,
+    toc_cache: C,
 ) -> Result<std::collections::BTreeMap<String, (u16, T)>>
 where
-    C: TocCache + Send + Sync + 'static,
+    C: TocCache,
     T: TryFrom<u8, Error = E> + Serialize + for<'de> Deserialize<'de>,
     E: Into<Error>,
 {
@@ -127,11 +126,13 @@ where
 
     let mut toc = std::collections::BTreeMap::new();
 
-    if let Some(toc_str) = toc_cache.lock().await.get_toc(toc_crc32) {
+    // Check cache first
+    if let Some(toc_str) = toc_cache.get_toc(toc_crc32) {
         toc = serde_json::from_str(&toc_str).map_err(|e| Error::InvalidParameter(format!("Failed to deserialize TOC cache: {}", e)))?;
         return Ok(toc);
     }
 
+    // Fetch TOC from device
     for i in 0..toc_len {
         let pk = Packet::new(
             port,
@@ -154,8 +155,9 @@ where
         toc.insert(format!("{}.{}", group, name), (id, item_type));
     }
 
+    // Store in cache
     let toc_str = serde_json::to_string(&toc).map_err(|e| Error::InvalidParameter(format!("Failed to serialize TOC: {}", e)))?;
-    toc_cache.lock().await.store_toc(toc_crc32, &toc_str);
+    toc_cache.store_toc(toc_crc32, &toc_str);
 
     Ok(toc)
 }
@@ -194,6 +196,7 @@ pub fn crtp_channel_dispatcher(
 }
 
 /// Null implementation of ToC cache to be used when no caching is needed.
+#[derive(Clone)]
 pub struct NoTocCache;
 
 impl TocCache for NoTocCache {
@@ -201,7 +204,8 @@ impl TocCache for NoTocCache {
         None
     }
 
-    fn store_toc(&mut self, _crc32: u32, _toc: &str) {
+    fn store_toc(&self, _crc32: u32, _toc: &str) {
+        // No-op: this cache doesn't store anything
     }
 }
 
@@ -210,7 +214,38 @@ impl TocCache for NoTocCache {
 /// This trait provides methods for storing and retrieving TOC information
 /// using a CRC32 checksum as the key. Implementations can use this to avoid
 /// re-fetching TOC data when the checksum matches a cached version.
-pub trait TocCache
+///
+/// # Concurrency
+///
+/// Both methods take `&self` to allow concurrent reads during parallel TOC fetching
+/// (Log and Param subsystems fetch their TOCs simultaneously). Implementations should
+/// use interior mutability (e.g., `RwLock`) for thread-safe caching.
+///
+/// # Example
+///
+/// ```rust
+/// use std::sync::{Arc, RwLock};
+/// use std::collections::HashMap;
+/// use crazyflie_lib::TocCache;
+///
+/// #[derive(Clone)]
+/// struct InMemoryCache {
+///     data: Arc<RwLock<HashMap<u32, String>>>,
+/// }
+///
+/// impl TocCache for InMemoryCache {
+///     fn get_toc(&self, crc32: u32) -> Option<String> {
+///         self.data.read().ok()?.get(&crc32).cloned()
+///     }
+///
+///     fn store_toc(&self, crc32: u32, toc: &str) {
+///         if let Ok(mut lock) = self.data.write() {
+///             lock.insert(crc32, toc.to_string());
+///         }
+///     }
+/// }
+/// ```
+pub trait TocCache: Clone + Send + Sync + 'static
 {
     /// Retrieves a cached TOC string based on the provided CRC32 checksum.
     ///
@@ -228,6 +263,6 @@ pub trait TocCache
     /// # Arguments
     ///
     /// * `crc32` - The CRC32 checksum used to identify the TOC.
-    /// * `toc` - The TOC string to be stored. 
-    fn store_toc(&mut self, crc32: u32, toc: &str);
+    /// * `toc` - The TOC string to be stored.
+    fn store_toc(&self, crc32: u32, toc: &str);
 }
