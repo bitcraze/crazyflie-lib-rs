@@ -13,11 +13,13 @@
 //! is modified by the Crazyflie during runtime, it sends a packet with the new
 //! value which updates the local value cache.
 
+use crate::crtp_utils::TocCache;
 use crate::{crtp_utils::WaitForPacket, Error, Result};
 use crate::{Value, ValueType};
 use crazyflie_link::Packet;
 use flume as channel;
 use futures::lock::Mutex;
+use serde::{Serialize, Deserialize};
 use std::{
     collections::{BTreeMap, HashMap},
     convert::{TryFrom, TryInto},
@@ -26,7 +28,7 @@ use std::{
 
 use crate::crazyflie::PARAM_PORT;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ParamItemInfo {
     item_type: ValueType,
     writable: bool,
@@ -87,14 +89,18 @@ const _WRITE_CHANNEL: u8 = 2;
 const _MISC_CHANNEL: u8 = 3;
 
 impl Param {
-    pub(crate) async fn new(
+    pub(crate) async fn new<T>(
         downlink: channel::Receiver<Packet>,
         uplink: channel::Sender<Packet>,
-    ) -> Result<Self> {
+        toc_cache: Arc<Mutex<T>>,
+    ) -> Result<Self>
+    where
+        T: TocCache + Send + Sync + 'static,
+    {
         let (toc_downlink, read_downlink, write_downlink, misc_downlink) =
             crate::crtp_utils::crtp_channel_dispatcher(downlink);
 
-        let toc = crate::crtp_utils::fetch_toc(PARAM_PORT, uplink.clone(), toc_downlink).await?;
+        let toc = crate::crtp_utils::fetch_toc(PARAM_PORT, uplink.clone(), toc_downlink, toc_cache).await?;
 
         let mut param = Self {
             uplink,
@@ -217,7 +223,11 @@ impl Param {
     /// # use crazyflie_link::LinkContext;
     /// # async fn example() -> Result<(), Error> {
     /// # let context = LinkContext::new();
-    /// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await?;
+    /// # let cf = Crazyflie::connect_from_uri(
+    /// #   &context,
+    /// #   "radio://0/60/2M/E7E7E7E7E7",
+    /// #   crazyflie_lib::NoTocCache
+    /// # ).await?;
     /// cf.param.set("example.param", 42u16).await?;  // From primitive
     /// cf.param.set("example.param", Value::U16(42)).await?;  // From Value
     /// # Ok(())
@@ -292,7 +302,11 @@ impl Param {
     /// # use crazyflie_link::LinkContext;
     /// # async fn example() -> Result<(), Error> {
     /// # let context = LinkContext::new();
-    /// # let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await?;
+    /// # let cf = Crazyflie::connect_from_uri(
+    /// #   &context,
+    /// #   "radio://0/60/2M/E7E7E7E7E7",
+    /// #   crazyflie_lib::NoTocCache
+    /// # ).await?;
     /// let example: u16 = cf.param.get("example.param").await?;  // To primitive
     /// dbg!(example);  // 42
     /// let example: Value = cf.param.get("example.param").await?;  // To Value

@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(uri) = found.first() {
         println!("Connecting to {}", &uri);
-        let cf = Crazyflie::connect_from_uri(&link_context, uri).await?;
+        let cf = Crazyflie::connect_from_uri(&link_context, uri, crazyflie_lib::NoTocCache).await?;
 
         let (mut tx, mut rx) = cf.platform.get_app_channel().await.unwrap();
 

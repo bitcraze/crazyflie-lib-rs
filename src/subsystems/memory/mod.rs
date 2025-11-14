@@ -161,7 +161,11 @@ impl Memory {
     /// use crazyflie_link::LinkContext;
     /// async fn example() -> Result<(), Error> {
     ///   let context = LinkContext::new();
-    ///   let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await?;
+    ///   let cf = Crazyflie::connect_from_uri(
+    ///       &context,
+    ///       "radio://0/60/2M/E7E7E7E7E7",
+    ///       crazyflie_lib::NoTocCache
+    ///   ).await?;
     ///   let memories = cf.memory.get_memories(Some(MemoryType::OneWire));
     ///   Ok(())
     /// };
@@ -174,7 +178,11 @@ impl Memory {
     /// use crazyflie_link::LinkContext;
     /// async fn example() -> Result<(), Error> {
     ///   let context = LinkContext::new();
-    ///   let cf = Crazyflie::connect_from_uri(&context, "radio://0/60/2M/E7E7E7E7E7").await?;
+    ///   let cf = Crazyflie::connect_from_uri(
+    ///       &context,
+    ///       "radio://0/60/2M/E7E7E7E7E7",
+    ///       crazyflie_lib::NoTocCache
+    ///   ).await?;
     ///   let memories = cf.memory.get_memories(None);
     ///   Ok(())
     /// };

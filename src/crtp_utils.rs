@@ -8,6 +8,8 @@ use async_trait::async_trait;
 use crazyflie_link::Packet;
 use flume as channel;
 use flume::{Receiver, Sender};
+use futures::lock::Mutex;
+use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
@@ -101,13 +103,15 @@ const TOC_CHANNEL: u8 = 0;
 const TOC_GET_ITEM: u8 = 2;
 const TOC_INFO: u8 = 3;
 
-pub(crate) async fn fetch_toc<T, E>(
+pub(crate) async fn fetch_toc<C, T, E>(
     port: u8,
     uplink: channel::Sender<Packet>,
     downlink: channel::Receiver<Packet>,
+    toc_cache: Arc<Mutex<C>>,
 ) -> Result<std::collections::BTreeMap<String, (u16, T)>>
 where
-    T: TryFrom<u8, Error = E>,
+    C: TocCache + Send + Sync + 'static,
+    T: TryFrom<u8, Error = E> + Serialize + for<'de> Deserialize<'de>,
     E: Into<Error>,
 {
     let pk = Packet::new(port, 0, vec![TOC_INFO]);
@@ -119,8 +123,14 @@ where
     let pk = downlink.wait_packet(port, TOC_CHANNEL, &[TOC_INFO]).await?;
 
     let toc_len = u16::from_le_bytes(pk.get_data()[1..3].try_into()?);
+    let toc_crc32 = u32::from_le_bytes(pk.get_data()[3..7].try_into()?);
 
     let mut toc = std::collections::BTreeMap::new();
+
+    if let Some(toc_str) = toc_cache.lock().await.get_toc(toc_crc32) {
+        toc = serde_json::from_str(&toc_str).map_err(|e| Error::InvalidParameter(format!("Failed to deserialize TOC cache: {}", e)))?;
+        return Ok(toc);
+    }
 
     for i in 0..toc_len {
         let pk = Packet::new(
@@ -143,6 +153,9 @@ where
         let item_type = pk.get_data()[3].try_into().map_err(|e: E| e.into())?;
         toc.insert(format!("{}.{}", group, name), (id, item_type));
     }
+
+    let toc_str = serde_json::to_string(&toc).map_err(|e| Error::InvalidParameter(format!("Failed to serialize TOC: {}", e)))?;
+    toc_cache.lock().await.store_toc(toc_crc32, &toc_str);
 
     Ok(toc)
 }
@@ -178,4 +191,43 @@ pub fn crtp_channel_dispatcher(
         receivers.pop().unwrap(),
         receivers.pop().unwrap(),
     )
+}
+
+/// Null implementation of ToC cache to be used when no caching is needed.
+pub struct NoTocCache;
+
+impl TocCache for NoTocCache {
+    fn get_toc(&self, _crc32: u32) -> Option<String> {
+        None
+    }
+
+    fn store_toc(&mut self, _crc32: u32, _toc: &str) {
+    }
+}
+
+/// A trait for caching Table of Contents (TOC) data.
+///
+/// This trait provides methods for storing and retrieving TOC information
+/// using a CRC32 checksum as the key. Implementations can use this to avoid
+/// re-fetching TOC data when the checksum matches a cached version.
+pub trait TocCache
+{
+    /// Retrieves a cached TOC string based on the provided CRC32 checksum.
+    ///
+    /// # Arguments
+    ///
+    /// * `crc32` - The CRC32 checksum used to identify the TOC.
+    ///
+    /// # Returns
+    ///
+    /// An `Option<String>` containing the cached TOC if it exists, or `None` if not found.
+    fn get_toc(&self, crc32: u32) -> Option<String>;
+
+    /// Stores a TOC string associated with the provided CRC32 checksum.
+    ///
+    /// # Arguments
+    ///
+    /// * `crc32` - The CRC32 checksum used to identify the TOC.
+    /// * `toc` - The TOC string to be stored. 
+    fn store_toc(&mut self, crc32: u32, toc: &str);
 }

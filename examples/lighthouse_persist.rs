@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let uri = std::env::var("CFURI").unwrap_or_else(|_| "radio://0/80/2M/E7E7E7E7E7".to_string());
     println!("Connecting to {} ...", uri);
 
-    let crazyflie = Crazyflie::connect_from_uri(&link_context, &uri).await?;
+    let crazyflie = Crazyflie::connect_from_uri(&link_context, &uri, crazyflie_lib::NoTocCache).await?;
     println!("Connected!");
 
     println!("\nThis example demonstrates the persist API.");
