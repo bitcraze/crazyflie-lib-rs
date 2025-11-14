@@ -8,8 +8,9 @@
 //! Functions that accesses variables, take a `name` parameter that accepts a string
 //! in the format "group.variable"
 //!
-//! During connection, the full param table of content is downloaded form the
-//! Crazyflie as well as the values of all the variable. If a variable value
+//! During connection, the full param table of content is downloaded from the
+//! Crazyflie. Parameter values are loaded on-demand when first accessed via `get()`.
+//! Parameters can also be set without reading them first. If a variable value
 //! is modified by the Crazyflie during runtime, it sends a packet with the new
 //! value which updates the local value cache.
 
@@ -282,8 +283,8 @@ impl Param {
 
     /// Get param value
     ///
-    /// Get value of a parameter. This function takes the value from a local
-    /// cache and so is quick.
+    /// Get value of a parameter. The first access will fetch the value from the
+    /// Crazyflie. Subsequent accesses are served from a local cache and are quick.
     ///
     /// Similarly to the `set` function above, the type of the param must match
     /// the return parameter. For example to get a u16 param:
