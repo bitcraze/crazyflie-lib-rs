@@ -84,7 +84,7 @@ impl FromMemoryBackend for EEPROMConfigMemory {
 
 impl EEPROMConfigMemory {
     pub(crate) async fn new(memory: MemoryBackend) -> Result<Self> {
-        let data = memory.read(0, 21).await?;
+        let data = memory.read::<fn(usize, usize)>(0, 21, None).await?;
         if data.len() >= 4 && &data[0..4] == b"0xBC" {
             let version = data[4];
             let radio_channel = data[5];
@@ -148,7 +148,7 @@ impl EEPROMConfigMemory {
       let checksum = data.iter().fold(0u8, |acc, &byte| acc.wrapping_add(byte));
       data.push(checksum);
 
-      self.memory.write(0, &data).await
+      self.memory.write::<fn(usize, usize)>(0, &data, None).await
     }
 
 
