@@ -88,7 +88,7 @@ impl MemoryBackend {
             current_address += to_read;
 
             if let Some(ref mut callback) = progress_callback {
-                callback(current_address- address, length);
+                callback(current_address - address, length);
             }
             
         }
