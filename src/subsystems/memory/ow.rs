@@ -88,7 +88,7 @@ impl FromMemoryBackend for OwMemory {
 
 impl OwMemory {
     pub(crate) async fn new(memory: MemoryBackend) -> Result<Self> {
-        let header = memory.read(0, 8).await?;
+        let header = memory.read::<fn(usize, usize)>(0, 8, None).await?;
 
         // Validate header byte
         if header[0] != 0xEB {
@@ -110,7 +110,7 @@ impl OwMemory {
           return Err(Error::MemoryError("OneWire CRC validation failed".to_owned()));
         }
 
-        let element_header = memory.read(8, 2).await?;
+        let element_header = memory.read::<fn(usize, usize)>(8, 2, None).await?;
         let version = element_header[0];
         let element_length = element_header[1];
 
@@ -118,8 +118,8 @@ impl OwMemory {
           return Err(Error::MemoryError("Unsupported OneWire version".to_owned()));   
         }
 
-        let elements = memory.read(10, element_length as usize).await?;
-        let elements_crc = memory.read(10 + element_length as usize, 1).await?[0];
+        let elements = memory.read::<fn(usize, usize)>(10, element_length as usize, None).await?;
+        let elements_crc = memory.read::<fn(usize, usize)>(10 + element_length as usize, 1, None).await?[0];
 
         let mut data = element_header;
         data.extend_from_slice(&elements);
