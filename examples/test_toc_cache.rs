@@ -2,29 +2,29 @@
 /// and measuring connection times with and without TOC caching.
 use crazyflie_lib::{Crazyflie, TocCache};
 use crazyflie_link::LinkContext;
-use std::{collections::HashMap, sync::Arc, sync::Mutex};
+use std::{collections::HashMap, sync::Arc, sync::RwLock};
 use tokio::time::{sleep, Duration};
 
 #[derive(Clone)]
 struct InMemoryTocCache {
-  toc: Arc<Mutex<HashMap<u32, String>>>,
+  toc: Arc<RwLock<HashMap<u32, String>>>,
 }
 
 impl InMemoryTocCache {
   fn new() -> Self {
     InMemoryTocCache {
-      toc: Arc::new(Mutex::new(HashMap::new())),
+      toc: Arc::new(RwLock::new(HashMap::new())),
     }
   }
 }
 
 impl TocCache for InMemoryTocCache {
   fn get_toc(&self, crc32: u32) -> Option<String> {
-    self.toc.lock().ok()?.get(&crc32).cloned()
+    self.toc.read().ok()?.get(&crc32).cloned()
   }
 
-  fn store_toc(&mut self, crc32: u32, toc: &str) {
-    if let Ok(mut lock) = self.toc.lock() {
+  fn store_toc(&self, crc32: u32, toc: &str) {
+    if let Ok(mut lock) = self.toc.write() {
       lock.insert(crc32, toc.to_string());
     }
   }
