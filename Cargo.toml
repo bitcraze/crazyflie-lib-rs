@@ -1,7 +1,11 @@
 [package]
 name = "crazyflie-lib"
-version = "0.3.0"
-authors = ["Arnaud Taffanel <arnaud@bitcraze.io>"]
+version = "0.4.0"
+authors = [
+  "Arnaud Taffanel <arnaud@bitcraze.io>",
+  "Rik Bouwmeester <rik@bitcraze.io>",
+  "Marcus Eliasson <marcus@bitcraze.io>"
+]
 edition = "2024"
 description = "Crazyflie quadcopter control lib"
 readme = "README.md"
@@ -22,7 +26,7 @@ flume = "0.11.1"
 async-trait = "0.1.89"
 num_enum = "0.7.5"
 half = { version = "2.7.1", features = ["serde"] }
-async-broadcast = "0.7.1"
+async-broadcast = "0.7.2"
 tokio = { version = "1.48.0", features = ["full"] }
 crc32fast = "1.5.0"
 hex = "0.4.3"
