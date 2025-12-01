@@ -33,14 +33,14 @@ use std::time::Duration;
 use crazyflie_lib::{Crazyflie, TocCache};
 use tokio::time::sleep;
 
-const URI1: &str = "radio://0/30/2M/BADBADBAD1";
-const URI2: &str = "radio://0/30/2M/BADBADBAD2";
-const URI3: &str = "radio://0/30/2M/BADBADBAD3";
-const URI4: &str = "radio://0/55/2M/BADBADBAD4";
-const URI5: &str = "radio://0/55/2M/BADBADBAD5";
-const URI6: &str = "radio://0/55/2M/BADBADBAD6";
-const URI7: &str = "radio://0/70/2M/BADBADBAD7";
-const URI8: &str = "radio://0/70/2M/BADBADBAD8";
+const URI1: &str = "radio://0/30/2M/E7E7E7E701";
+const URI2: &str = "radio://0/30/2M/E7E7E7E702";
+const URI3: &str = "radio://0/30/2M/E7E7E7E703";
+const URI4: &str = "radio://0/55/2M/E7E7E7E704";
+const URI5: &str = "radio://0/55/2M/E7E7E7E705";
+const URI6: &str = "radio://0/55/2M/E7E7E7E706";
+const URI7: &str = "radio://0/70/2M/E7E7E7E707";
+const URI8: &str = "radio://0/70/2M/E7E7E7E708";
 
 // Center of the spiral
 const X0: f32 = 0.0;
@@ -203,12 +203,12 @@ async fn run_shared_sequence(cf: &Crazyflie, uri: &str, max_takeoff_duration: f3
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let uris = vec![
-        //URI1,
-        //URI2,
+        URI1,
+        URI2,
         URI3,
         URI4,
         URI5,
-        //URI6,
+        URI6,
         URI7,
         URI8,
     ];
