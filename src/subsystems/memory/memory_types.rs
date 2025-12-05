@@ -31,7 +31,9 @@ pub struct MemoryDevice {
     /// Type of memory
     pub memory_type: MemoryType,
     /// Size of the memory in bytes
-    pub size: u32
+    pub size: u32,
+    /// Serial number of the memory
+    pub serial: Option<[u8; 12]>,
 }
 
 impl MemoryBackend {
@@ -201,6 +203,8 @@ pub enum MemoryType {
     DeckMemory = 0x19,
     /// Deck Ctrl memory type
     DeckCtrlDFU = 0x20,
+    /// Deck Ctrl memory type
+    DeckCtrl = 0x21,
     /// Deck multi-ranger memory type
     DeckMultiranger = 0x1A,
     /// Deck PAA3905 memory type
@@ -226,6 +230,7 @@ impl TryFrom<u8> for MemoryType {
             0x18 => Ok(MemoryType::App),
             0x19 => Ok(MemoryType::DeckMemory),
             0x20 => Ok(MemoryType::DeckCtrlDFU),
+            0x21 => Ok(MemoryType::DeckCtrl),
             0x1A => Ok(MemoryType::DeckMultiranger),
             0x1B => Ok(MemoryType::DeckPaa3905),
             _ => Ok(MemoryType::UNKNOWN),
@@ -248,6 +253,7 @@ impl std::fmt::Display for MemoryType {
             MemoryType::App => "Application",
             MemoryType::DeckMemory => "Deck Memory",
             MemoryType::DeckCtrlDFU => "Deck Ctrl DFU",
+            MemoryType::DeckCtrl => "Deck Ctrl",
             MemoryType::DeckMultiranger => "Deck Multiranger",
             MemoryType::DeckPaa3905 => "Deck PAA3905",
             MemoryType::UNKNOWN => "Unknown",
