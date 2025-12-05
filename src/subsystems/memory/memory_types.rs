@@ -199,6 +199,8 @@ pub enum MemoryType {
     App = 0x18,
     /// Deck memory type
     DeckMemory = 0x19,
+    /// Deck Ctrl memory type
+    DeckCtrlDFU = 0x20,
     /// Deck multi-ranger memory type
     DeckMultiranger = 0x1A,
     /// Deck PAA3905 memory type
@@ -223,6 +225,7 @@ impl TryFrom<u8> for MemoryType {
             0x17 => Ok(MemoryType::DriverLedTiming),
             0x18 => Ok(MemoryType::App),
             0x19 => Ok(MemoryType::DeckMemory),
+            0x20 => Ok(MemoryType::DeckCtrlDFU),
             0x1A => Ok(MemoryType::DeckMultiranger),
             0x1B => Ok(MemoryType::DeckPaa3905),
             _ => Ok(MemoryType::UNKNOWN),
@@ -244,6 +247,7 @@ impl std::fmt::Display for MemoryType {
             MemoryType::DriverLedTiming => "Driver LED Timing",
             MemoryType::App => "Application",
             MemoryType::DeckMemory => "Deck Memory",
+            MemoryType::DeckCtrlDFU => "Deck Ctrl DFU",
             MemoryType::DeckMultiranger => "Deck Multiranger",
             MemoryType::DeckPaa3905 => "Deck PAA3905",
             MemoryType::UNKNOWN => "Unknown",
