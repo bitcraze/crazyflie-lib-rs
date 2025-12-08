@@ -131,11 +131,19 @@ impl Memory {
         let memory_id = data[1];
         let memory_type = MemoryType::try_from(data[2])?;
         let memory_size = u32::from_le_bytes(data[3..7].try_into()?);
+        let raw_memory_serial = Vec::from(&data[7..]);
+
+        let memory_serial = if raw_memory_serial.iter().all(|&b| b == 0) {
+          None
+        } else {
+          Some(raw_memory_serial)
+        };
 
         self.memories.push(MemoryDevice {
           memory_id: memory_id,
           memory_type: memory_type,
-          size: memory_size
+          size: memory_size,
+          serial: memory_serial,
         });
 
         self.backends.push(Mutex::new(Some(MemoryBackend {
