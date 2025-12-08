@@ -33,7 +33,7 @@ pub struct MemoryDevice {
     /// Size of the memory in bytes
     pub size: u32,
     /// Serial number of the memory
-    pub serial: Option<[u8; 12]>,
+    pub serial: Option<Vec<u8>>,
 }
 
 impl MemoryBackend {
