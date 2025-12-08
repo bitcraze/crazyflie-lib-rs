@@ -138,7 +138,7 @@ impl Memory {
         if data.len() >= 19 {
           raw_memory_serial.copy_from_slice(&data[7..19]);
         } else {
-          raw_memory_serial[0..8].copy_from_slice(&data[7..15]);
+          raw_memory_serial[4..12].copy_from_slice(&data[7..15]);
         }
 
         let memory_serial = if raw_memory_serial.iter().all(|&b| b == 0) {
