@@ -27,7 +27,7 @@ The following subsystems are or need to be implemented:
    - [ ] MemoryTester
    - [ ] DriverLedTiming
    - [ ] App
-   - [ ] DeckMemory
+   - [x] DeckMemory
    - [ ] DeckMultiranger
    - [ ] DeckPaa3905
  - [x] Param subsystem

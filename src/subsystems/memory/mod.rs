@@ -17,6 +17,7 @@ use tokio::sync::Mutex;
 
 mod memory_types;
 mod eeprom_config;
+mod deckmem;
 mod raw;
 mod ow;
 
@@ -24,6 +25,7 @@ use crate::crazyflie::MEMORY_PORT;
 
 pub use memory_types::*;
 pub use eeprom_config::*;
+pub use deckmem::*;
 pub use raw::*;
 pub use ow::*;
 
