@@ -1,6 +1,6 @@
 [package]
 name = "crazyflie-lib"
-version = "0.4.0"
+version = "0.4.1"
 authors = [
   "Arnaud Taffanel <arnaud@bitcraze.io>",
   "Rik Bouwmeester <rik@bitcraze.io>",
@@ -22,7 +22,7 @@ crazyflie-link = "0.3.0"
 futures-util = "0.3.31"
 futures = "0.3.31"
 async-stream = "0.3.6"
-flume = "0.11.1"
+flume = "0.12.0"
 async-trait = "0.1.89"
 num_enum = "0.7.5"
 half = { version = "2.7.1", features = ["serde"] }
