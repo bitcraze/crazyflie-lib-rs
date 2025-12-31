@@ -7,6 +7,19 @@ use crate::{
 use memory_types::{FromMemoryBackend, MemoryType};
 use tokio::{sync::Mutex, time::sleep};
 
+// Bit field 1 masks (0x0000)
+const IS_VALID_MASK: u8 = 0x01;
+const IS_STARTED_MASK: u8 = 0x02;
+const SUPPORTS_READ_MASK: u8 = 0x04;
+const SUPPORTS_WRITE_MASK: u8 = 0x08;
+const SUPPORTS_UPGRADE_MASK: u8 = 0x10;
+const UPGRADE_REQUIRED_MASK: u8 = 0x20;
+const BOOTLOADER_ACTIVE_MASK: u8 = 0x40;
+
+// Bit field 2 masks (0x0001)
+const CAN_RESET_TO_FIRMWARE_MASK: u8 = 0x01;
+const CAN_RESET_TO_BOOTLOADER_MASK: u8 = 0x02;
+
 /// Describes the content of a Crazyflie deck memory used to access the deck firmware and bootloaders
 #[derive(Debug)]
 pub struct DeckMemory {
@@ -45,21 +58,15 @@ impl FromMemoryBackend for DeckMemory {
 /// Represents a memory section for a deck in the Crazyflie system.
 ///
 /// This structure contains information about a deck's memory configuration,
-/// including its capabilities (read, write, upgrade), state (bootloader active,
-/// upgrade required), and memory layout (addresses for base, command, and info).
+/// including its capabilities (read, write, upgrade) and memory layout (addresses
+/// for base, command, and info).
 pub struct DeckMemorySection {
-    /// Indicates whether the deck has been started
-    is_started: bool,
     /// Whether the the deck supports read operations
     supports_read: bool,
     /// Whether the the deck supports write operations
     supports_write: bool,
     /// Whether the the deck supports firmware upgrades
     supports_upgrade: bool,
-    /// Whether a firmware upgrade is required for this deck
-    upgrade_required: bool,
-    /// Whether the deck is currently running in bootloader mode
-    bootloader_active: bool,
     /// Whether the deck can be reset to run firmware
     can_reset_to_firmware: bool,
     /// Whether the deck can be reset to bootloader mode
@@ -92,7 +99,7 @@ impl DeckMemorySection {
             .read::<fn(usize, usize)>(info_offset, 0x20, None)
             .await?;
 
-        // Validate minimum data length for parsing
+        // Validate minimum data length for parsing so we don't panic later
         if data.len() < 0x20 {
             println!(
                 "DeckMemorySection: Insufficient data length: {}",
@@ -101,28 +108,20 @@ impl DeckMemorySection {
             return Ok(None);
         }
 
-        // Parse bit field 1 (0x0000)
+        // Only cache data which is not changed between restarts of the Crazyflie
+
         let bit_field_1 = data[0];
-        let is_valid = (bit_field_1 & 0x01) != 0;
-        let is_started = (bit_field_1 & 0x02) != 0;
-        let supports_read = (bit_field_1 & 0x04) != 0;
-        let supports_write = (bit_field_1 & 0x08) != 0;
-        let supports_upgrade = (bit_field_1 & 0x10) != 0;
-        let upgrade_required = (bit_field_1 & 0x20) != 0;
-        let bootloader_active = (bit_field_1 & 0x40) != 0;
+        let is_valid = (bit_field_1 & IS_VALID_MASK) != 0;
+        let supports_read = (bit_field_1 & SUPPORTS_READ_MASK) != 0;
+        let supports_write = (bit_field_1 & SUPPORTS_WRITE_MASK) != 0;
+        let supports_upgrade = (bit_field_1 & SUPPORTS_UPGRADE_MASK) != 0;
 
-        // Parse bit field 2 (0x0001)
         let bit_field_2 = data[1];
-        let can_reset_to_firmware = (bit_field_2 & 0x01) != 0;
-        let can_reset_to_bootloader = (bit_field_2 & 0x02) != 0;
+        let can_reset_to_firmware = (bit_field_2 & CAN_RESET_TO_FIRMWARE_MASK) != 0;
+        let can_reset_to_bootloader = (bit_field_2 & CAN_RESET_TO_BOOTLOADER_MASK) != 0;
 
-        // Parse required hash (0x0002, uint32)
         let required_hash = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
-
-        // Parse required length (0x0006, uint32)
         let required_length = u32::from_le_bytes([data[6], data[7], data[8], data[9]]);
-
-        // Parse base address (0x000A, uint32)
         let base_address = u32::from_le_bytes([data[10], data[11], data[12], data[13]]);
 
         // Parse name (0x000E, 18 bytes max, zero terminated)
@@ -136,12 +135,9 @@ impl DeckMemorySection {
 
         if is_valid {
             Ok(Some(DeckMemorySection {
-                is_started,
                 supports_read,
                 supports_write,
                 supports_upgrade,
-                upgrade_required,
-                bootloader_active,
                 can_reset_to_firmware,
                 can_reset_to_bootloader,
                 required_hash: match required_hash {
@@ -163,32 +159,19 @@ impl DeckMemorySection {
         }
     }
 
-    async fn update_status_bits(&mut self) -> Result<()> {
-        let data = self
-            .memory
+    async fn read_info_byte(&self) -> Result<u8> {
+        let data = self.memory
             .lock()
             .await
-            .read::<fn(usize, usize)>(self.info_address, 2, None)
+            .read::<fn(usize, usize)>(self.info_address, 1, None)
             .await?;
-        if data.len() < 1 {
-            return Err(Error::MemoryError("Failed to read status bits".to_owned()));
-        }
-
-        // Parse bit field 1 (0x0000)
-        let bit_field_1 = data[0];
-        self.bootloader_active = (bit_field_1 & 0x40) != 0;
-
-        // Parse bit field 2 (0x0001)
-        let bit_field_2 = data[1];
-        self.can_reset_to_firmware = (bit_field_2 & 0x01) != 0;
-        self.can_reset_to_bootloader = (bit_field_2 & 0x02) != 0;
-
-        Ok(())
+        Ok(data[0])
     }
 
     /// Returns whether the deck has been started.
-    pub fn is_started(&self) -> bool {
-        self.is_started
+    pub async fn is_started(&self) -> Result<bool> {
+        let data = self.read_info_byte().await?;
+        Ok((data & IS_STARTED_MASK) != 0)
     }
 
     /// Returns whether this deck supports read operations.
@@ -207,13 +190,15 @@ impl DeckMemorySection {
     }
 
     /// Returns whether a firmware upgrade is required for this deck.
-    pub fn upgrade_required(&self) -> bool {
-        self.upgrade_required
+    pub async fn upgrade_required(&self) -> Result<bool> {
+        let data = self.read_info_byte().await?;
+        Ok((data & UPGRADE_REQUIRED_MASK) != 0)
     }
 
     /// Returns whether the bootloader is currently active on this deck.
-    pub fn bootloader_active(&self) -> bool {
-        self.bootloader_active
+    pub async fn bootloader_active(&self) -> Result<bool> {
+        let data = self.read_info_byte().await?;
+        Ok((data & BOOTLOADER_ACTIVE_MASK) != 0)
     }
 
     /// Returns whether this deck can be reset to firmware mode.
@@ -248,7 +233,7 @@ impl DeckMemorySection {
     /// # Errors
     /// Returns an `Error` if the section does not support resetting to bootloader
     /// or if the reset operation fails
-    pub async fn reset_to_bootloader(&mut self) -> Result<()> {
+    pub async fn reset_to_bootloader(&self) -> Result<()> {
         if !self.can_reset_to_bootloader {
             return Err(Error::MemoryError(
                 "Section cannot reset to bootloader".to_owned(),
@@ -265,7 +250,7 @@ impl DeckMemorySection {
         // Sleep for 10 ms to allow the reset to complete
         sleep(Duration::from_millis(10)).await;
 
-        self.update_status_bits().await
+        Ok(())
     }
 
     /// Reset the MCU connected to this memory section into firmware mode.
@@ -275,7 +260,7 @@ impl DeckMemorySection {
     /// # Errors
     /// Returns an `Error` if the section does not support resetting to firmware
     /// or if the reset operation fails
-    pub async fn reset_to_firmware(&mut self) -> Result<()> {
+    pub async fn reset_to_firmware(&self) -> Result<()> {
         if !self.can_reset_to_firmware {
             return Err(Error::MemoryError(
                 "Section cannot reset to firmware".to_owned(),
@@ -292,7 +277,7 @@ impl DeckMemorySection {
         // Sleep for 10 ms to allow the reset to complete
         sleep(Duration::from_millis(10)).await;
 
-        self.update_status_bits().await
+        Ok(())
     }
 
     /// Write data to the memory section at the specified address.
