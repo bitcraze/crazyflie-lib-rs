@@ -61,11 +61,11 @@ impl FromMemoryBackend for DeckMemory {
 /// including its capabilities (read, write, upgrade) and memory layout (addresses
 /// for base, command, and info).
 pub struct DeckMemorySection {
-    /// Whether the the deck supports read operations
+    /// Whether the deck supports read operations
     supports_read: bool,
-    /// Whether the the deck supports write operations
+    /// Whether the deck supports write operations
     supports_write: bool,
-    /// Whether the the deck supports firmware upgrades
+    /// Whether the deck supports firmware upgrades
     supports_upgrade: bool,
     /// Whether the deck can be reset to run firmware
     can_reset_to_firmware: bool,
@@ -290,7 +290,7 @@ impl DeckMemorySection {
     /// A `Result` indicating success or failure of the write operation.
     /// # Errors
     /// Returns an `Error` if the section does not support writing or if the write operation fails.
-    pub async fn write(&self, address: usize, data: &Vec<u8>) -> Result<()> {
+    pub async fn write(&self, address: usize, data: &[u8]) -> Result<()> {
         if !self.supports_write {
             return Err(Error::MemoryError(
                 "Section does not support write".to_owned(),
@@ -319,7 +319,7 @@ impl DeckMemorySection {
     pub async fn write_with_progress<F>(
         &self,
         address: usize,
-        data: &Vec<u8>,
+        data: &[u8],
         progress_callback: F,
     ) -> Result<()>
     where
@@ -346,9 +346,9 @@ impl DeckMemorySection {
     /// # Returns
     /// A `Result` containing a vector of bytes read from the memory section or an `Error` if the operation fails.
     pub async fn read(&self, address: usize, length: usize) -> Result<Vec<u8>> {
-        if !self.supports_write {
+        if !self.supports_read {
             return Err(Error::MemoryError(
-                "Section does not support write".to_owned(),
+                "Section does not support read".to_owned(),
             ));
         }
 
@@ -430,9 +430,9 @@ impl DeckMemory {
 
     /// Get all memory sections available in this deck memory.
     /// # Returns
-    /// A a vector of `DeckMemorySection` representing all available sections.
-    pub fn sections(&self) -> Vec<DeckMemorySection> {
-        self.sections.clone()
+    /// A slice of `DeckMemorySection` representing all available sections.
+    pub fn sections(&self) -> &[DeckMemorySection] {
+        &self.sections
     }
 
     /// Get a memory section by name.
