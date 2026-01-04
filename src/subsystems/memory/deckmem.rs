@@ -7,6 +7,8 @@ use crate::{
 use memory_types::{FromMemoryBackend, MemoryType};
 use tokio::{sync::Mutex, time::sleep};
 
+const DECKMEM_VERSION_REQUIREMENT: u8 = 3;
+
 // Bit field 1 masks (0x0000)
 const IS_VALID_MASK: u8 = 0x01;
 const IS_STARTED_MASK: u8 = 0x02;
@@ -19,6 +21,16 @@ const BOOTLOADER_ACTIVE_MASK: u8 = 0x40;
 // Bit field 2 masks (0x0001)
 const CAN_RESET_TO_FIRMWARE_MASK: u8 = 0x01;
 const CAN_RESET_TO_BOOTLOADER_MASK: u8 = 0x02;
+
+const DECKMEM_MAX_SECTIONS: usize = 8;
+const DECKMEM_INFO_OFFSET: usize = 1;
+const DECKMEM_INFO_SIZE: usize = 0x20;
+const DECKMEM_CMD_OFFSET: usize = 0x1000;
+const DECKMEM_CMD_SIZE: usize = 0x20;
+const DECKMEM_CMD_BITS_OFFSET: usize = 0x4;
+
+const DECKMEM_CMD_RST_TO_FIRMWARE: u8 = 0x01;
+const DECKMEM_CMD_RST_TO_BOOTLOADER: u8 = 0x02;
 
 /// Describes the content of a Crazyflie deck memory used to access the deck firmware and bootloaders
 #[derive(Debug)]
@@ -45,12 +57,12 @@ impl FromMemoryBackend for DeckMemory {
         ))
     }
 
-    fn close_memory(self) -> MemoryBackend {
-        // Drop all sections and return the backend
-
+    fn close_memory(self) -> Result<MemoryBackend> {
+        // Drop all sections and return the backend, or report an error if the
+        // underlying memory is still shared by multiple references.
         Arc::try_unwrap(self.memory)
-            .expect("Multiple references to memory")
-            .into_inner()
+            .map_err(|_| Error::MemoryError("Multiple references to memory".to_owned()))
+            .map(|mutex| mutex.into_inner())
     }
 }
 
@@ -96,15 +108,11 @@ impl DeckMemorySection {
         let data = memory
             .lock()
             .await
-            .read::<fn(usize, usize)>(info_offset, 0x20, None)
+            .read::<fn(usize, usize)>(info_offset, DECKMEM_INFO_SIZE, None)
             .await?;
 
         // Validate minimum data length for parsing so we don't panic later
-        if data.len() < 0x20 {
-            println!(
-                "DeckMemorySection: Insufficient data length: {}",
-                data.len()
-            );
+        if data.len() < DECKMEM_INFO_SIZE {
             return Ok(None);
         }
 
@@ -124,8 +132,8 @@ impl DeckMemorySection {
         let required_length = u32::from_le_bytes([data[6], data[7], data[8], data[9]]);
         let base_address = u32::from_le_bytes([data[10], data[11], data[12], data[13]]);
 
-        // Parse name (0x000E, 18 bytes max, zero terminated)
-        let name_bytes = &data[14..33.min(data.len())];
+        // Parse name (offset 0x000E / 14, up to 19 bytes including null terminator, zero terminated)
+        let name_bytes = &data[14..32];
         let name = name_bytes
             .iter()
             .take_while(|&&b| b != 0)
@@ -244,7 +252,7 @@ impl DeckMemorySection {
         self.memory
             .lock()
             .await
-            .write::<fn(usize, usize)>(self.command_address + 4, &[0x02u8], None)
+            .write::<fn(usize, usize)>(self.command_address + DECKMEM_CMD_BITS_OFFSET, &[DECKMEM_CMD_RST_TO_BOOTLOADER], None)
             .await?;
 
         // Sleep for 10 ms to allow the reset to complete
@@ -271,7 +279,7 @@ impl DeckMemorySection {
         self.memory
             .lock()
             .await
-            .write::<fn(usize, usize)>(self.command_address + 4, &[0x01u8], None)
+            .write::<fn(usize, usize)>(self.command_address + DECKMEM_CMD_BITS_OFFSET, &[DECKMEM_CMD_RST_TO_FIRMWARE], None)
             .await?;
 
         // Sleep for 10 ms to allow the reset to complete
@@ -352,12 +360,12 @@ impl DeckMemorySection {
             ));
         }
 
-        return self
+        self
             .memory
             .lock()
             .await
             .read::<fn(usize, usize)>(self.base_address + address, length, None)
-            .await;
+            .await
     }
 
     /// Read data from the memory section at the specified address with progress reporting.
@@ -404,7 +412,7 @@ impl DeckMemory {
 
         // Parse version byte
         let version = info[0];
-        if version != 3 {
+        if version != DECKMEM_VERSION_REQUIREMENT {
             return Err(Error::MemoryError(format!(
                 "Unsupported deck memory version: {}",
                 version
@@ -412,9 +420,9 @@ impl DeckMemory {
         }
 
         let mut sections: Vec<DeckMemorySection> = Vec::new();
-        for i in 0..8 {
-            let info_base = 1 + i * 0x20;
-            let cmd_base = 0x1000 + i * 0x10;
+        for i in 0..DECKMEM_MAX_SECTIONS {
+            let info_base = DECKMEM_INFO_OFFSET + i * DECKMEM_INFO_SIZE;
+            let cmd_base = DECKMEM_CMD_OFFSET + i * DECKMEM_CMD_SIZE;
             if let Some(section) =
                 DeckMemorySection::from_bytes(sharable_memory.clone(), info_base, cmd_base).await?
             {
@@ -436,7 +444,7 @@ impl DeckMemory {
     }
 
     /// Get a memory section by name.
-    ///  /// # Arguments
+    /// # Arguments
     /// * `name` - The name of the memory section to retrieve.
     /// # Returns
     /// An `Option` containing a reference to the `DeckMemorySection` if found, or `None` if not found.

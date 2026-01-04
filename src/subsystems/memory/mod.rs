@@ -223,8 +223,8 @@ impl Memory {
     /// # Arguments
     /// * `memory_device` - The MemoryDevice struct representing the memory to close
     /// * `backend` - The MemoryBackend to return to the subsystem
-    pub async fn close_memory<T: FromMemoryBackend>(&self, device: T) {
-      let backend = device.close_memory();
+    pub async fn close_memory<T: FromMemoryBackend>(&self, device: T) -> Result<()> {
+      let backend = device.close_memory()?;
       if let Some(mutex) = self.backends.get(backend.memory_id as usize) {
         let mut guard = mutex.lock().await;
         if guard.is_none() {
@@ -235,6 +235,7 @@ impl Memory {
       } else {
         println!("Warning: Attempted to close memory ID {} which does not exist", backend.memory_id);
       }
+      Ok(())
     }
 
     /// Get a specific memory by its ID and initialize it according to the defaults. Note that the

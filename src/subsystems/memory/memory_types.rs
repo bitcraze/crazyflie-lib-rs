@@ -173,7 +173,7 @@ pub trait FromMemoryBackend: Sized {
     /// # Arguments
     /// * `memory_device` - The MemoryDevice struct representing the memory to close
     /// * `backend` - The MemoryBackend to return to the subsystem
-    fn close_memory(self) -> MemoryBackend;
+    fn close_memory(self) -> Result<MemoryBackend>;
 }
 
 /// The memory types supported by the Crazyflie

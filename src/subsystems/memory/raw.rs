@@ -16,8 +16,8 @@ impl FromMemoryBackend for RawMemory {
         Ok(Self { memory })
     }
 
-    fn close_memory(self) -> MemoryBackend {
-      self.memory
+    fn close_memory(self) -> Result<MemoryBackend> {
+      Ok(self.memory)
     }
 }
 
