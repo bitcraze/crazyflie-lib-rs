@@ -224,7 +224,7 @@ impl Memory {
     /// * `memory_device` - The MemoryDevice struct representing the memory to close
     /// * `backend` - The MemoryBackend to return to the subsystem
     pub async fn close_memory<T: FromMemoryBackend>(&self, device: T) -> Result<()> {
-      let backend = device.close_memory()?;
+      let backend = device.close_memory();
       if let Some(mutex) = self.backends.get(backend.memory_id as usize) {
         let mut guard = mutex.lock().await;
         if guard.is_none() {

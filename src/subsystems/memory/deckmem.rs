@@ -57,16 +57,21 @@ impl FromMemoryBackend for DeckMemory {
         ))
     }
 
-    fn close_memory(self) -> Result<MemoryBackend> {
-        // Drop all sections and return the backend, or report an error if the
-        // underlying memory is still shared by multiple references.
+    fn close_memory(mut self) -> MemoryBackend {
+        // Drop all sections to release their Arc references
+        self.sections.clear();
+
+        // Return backend
         Arc::try_unwrap(self.memory)
-            .map_err(|_| Error::MemoryError("Multiple references to memory".to_owned()))
+            .map_err(|_arc| {
+                Error::MemoryError(format!("Multiple references to memory"))
+            })
             .map(|mutex| mutex.into_inner())
+            .expect("Failed to close memory")
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 /// Represents a memory section for a deck in the Crazyflie system.
 ///
 /// This structure contains information about a deck's memory configuration,
