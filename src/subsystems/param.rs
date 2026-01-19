@@ -33,7 +33,7 @@ use crate::crazyflie::PARAM_PORT;
 const MISC_CHANNEL: u8 = 3;
 const MISC_GET_DEFAULT_VALUE: u8 = 6;
 const MISC_PERSISTENT_STORE: u8 = 3;
-const _MISC_PERSISTENT_CLEAR: u8 = 5;
+const MISC_PERSISTENT_CLEAR: u8 = 5;
 const MISC_PERSISTENT_GET_STATE: u8 = 4;
 
 /// State of a persistent parameter
@@ -760,6 +760,76 @@ impl Param {
         } else {
             Err(Error::ParamError(format!(
                 "Failed to store parameter '{}': status code {}",
+                name, status
+            )))
+        }
+    }
+
+    /// Clear the stored value of a persistent parameter from EEPROM.
+    ///
+    /// This removes the parameter's stored value from non-volatile memory,
+    /// causing it to revert to the firmware default on subsequent boots.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # async fn example(cf: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
+    /// // Clear the stored value, reverting to default
+    /// cf.param.persistent_clear("ring.effect").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn persistent_clear(&self, name: &str) -> Result<()> {
+        let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+
+        if !param_info.persistent {
+            return Err(Error::ParamError(format!(
+                "Parameter '{}' is not persistent",
+                name
+            )));
+        }
+
+        // Send request: [CMD(1), ID(2)]
+        let request = Packet::new(
+            PARAM_PORT,
+            MISC_CHANNEL,
+            vec![
+                MISC_PERSISTENT_CLEAR,
+                (param_id & 0xff) as u8,
+                (param_id >> 8) as u8,
+            ],
+        );
+
+        self.uplink
+            .send_async(request)
+            .await
+            .map_err(|_| Error::Disconnected)?;
+
+        // Wait for response: [CMD(1), ID(2), STATUS(1)]
+        let response = {
+            let misc_downlink = self.misc_downlink.lock().await;
+            misc_downlink
+                .recv_async()
+                .await
+                .map_err(|_| Error::Disconnected)?
+        };
+
+        let data = response.get_data();
+
+        // Verify response length
+        if data.len() < 4 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short: expected 4 bytes, got {}",
+                data.len()
+            )));
+        }
+
+        let status = data[3];
+
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(Error::ParamError(format!(
+                "Failed to clear parameter '{}': status code {}",
                 name, status
             )))
         }

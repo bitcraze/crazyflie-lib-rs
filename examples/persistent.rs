@@ -99,5 +99,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Step 5: Clear a stored value from EEPROM
+    println!("\n=== Clearing a Stored Parameter ===\n");
+    
+    println!("Clearing stored value from EEPROM...");
+    cf.param.persistent_clear(test_param).await?;
+    println!("✓ Cleared successfully!\n");
+    
+    // Verify it's now using the default again
+    match cf.param.persistent_get_state(test_param).await {
+        Ok(state) => {
+            println!("Verification:");
+            println!("  Default value: {:?}", state.default_value);
+            if state.is_stored {
+                println!("  Stored value:  {:?} ✓", state.stored_value.unwrap());
+            } else {
+                println!("  Stored: No (using default)");
+            }
+        }
+        Err(e) => {
+            println!("Verification failed: {:?}", e);
+        }
+    }
+
     Ok(())
 }
