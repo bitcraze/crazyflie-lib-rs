@@ -33,6 +33,7 @@ use crate::crazyflie::PARAM_PORT;
 struct ParamItemInfo {
     item_type: ValueType,
     writable: bool,
+    persistent: bool,
 }
 
 impl TryFrom<u8> for ParamItemInfo {
@@ -60,6 +61,7 @@ impl TryFrom<u8> for ParamItemInfo {
                 }
             },
             writable: (value & (1 << 6)) == 0,
+            persistent: (value & (1 << 4)) != 0,
         })
     }
 }
@@ -428,5 +430,17 @@ impl Param {
         for i in to_remove.into_iter().rev() {
             watchers.remove(i);
         }
+    }
+
+    /// Check if a parameter supports persistent storage
+    ///
+    /// Returns `true` if the parameter can be stored in EEPROM, `false` otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the parameter does not exist.
+    pub async fn is_persistent(&self, name: &str) -> Result<bool> {
+        let (_, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+        Ok(param_info.persistent)
     }
 }
