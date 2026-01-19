@@ -34,7 +34,18 @@ const MISC_CHANNEL: u8 = 3;
 const MISC_GET_DEFAULT_VALUE: u8 = 6;
 const _MISC_PERSISTENT_STORE: u8 = 3;
 const _MISC_PERSISTENT_CLEAR: u8 = 5;
-const _MISC_PERSISTENT_GET_STATE: u8 = 4;
+const MISC_PERSISTENT_GET_STATE: u8 = 4;
+
+/// State of a persistent parameter
+#[derive(Debug, Clone)]
+pub struct PersistentParamState {
+    /// True if a value is currently stored in EEPROM
+    pub is_stored: bool,
+    /// The firmware's default value for this parameter
+    pub default_value: Value,
+    /// The value stored in EEPROM (if is_stored is true)
+    pub stored_value: Option<Value>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ParamItemInfo {
@@ -543,5 +554,141 @@ impl Param {
 
         // Parse value from data[3..]
         Value::from_le_bytes(&data[3..], param_info.item_type)
+    }
+
+    /// Get the complete state of a persistent parameter
+    ///
+    /// This retrieves comprehensive information about a persistent parameter:
+    /// - Whether a value is currently stored in EEPROM
+    /// - The firmware's default value
+    /// - The stored value (if one exists)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The parameter does not exist
+    /// - The parameter is not persistent
+    /// - Communication with the Crazyflie fails
+    /// - The firmware does not support this operation for the parameter
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use crazyflie_lib::{Crazyflie, NoTocCache};
+    /// # use crazyflie_link::LinkContext;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let context = LinkContext::new();
+    /// # let cf = Crazyflie::connect_from_uri(
+    /// #   &context,
+    /// #   "radio://0/60/2M/E7E7E7E7E7",
+    /// #   crazyflie_lib::NoTocCache
+    /// # ).await?;
+    /// let state = cf.param.persistent_get_state("ring.effect").await?;
+    /// 
+    /// println!("Default value: {:?}", state.default_value);
+    /// if state.is_stored {
+    ///     println!("Stored value: {:?}", state.stored_value.unwrap());
+    /// } else {
+    ///     println!("Using default (not stored)");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn persistent_get_state(&self, name: &str) -> Result<PersistentParamState> {
+        let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+
+        if !param_info.persistent {
+            return Err(Error::ParamError(format!(
+                "Parameter '{}' is not persistent",
+                name
+            )));
+        }
+
+        // Send request: [CMD(1), ID(2)]
+        let request = Packet::new(
+            PARAM_PORT,
+            MISC_CHANNEL,
+            vec![
+                MISC_PERSISTENT_GET_STATE,
+                (param_id & 0xff) as u8,
+                (param_id >> 8) as u8,
+            ],
+        );
+
+        self.uplink
+            .send_async(request)
+            .await
+            .map_err(|_| Error::Disconnected)?;
+
+        // Wait for response: [CMD(1), ID(2), STATUS(1), VALUE_DATA(?)]
+        let response = {
+            let misc_downlink = self.misc_downlink.lock().await;
+            misc_downlink
+                .recv_async()
+                .await
+                .map_err(|_| Error::Disconnected)?
+        };
+
+        let data = response.get_data();
+
+        // Response format: [CMD(1), ID(2), STATUS(1), VALUE_DATA(?)]
+        // Verify minimum response length
+        if data.len() < 4 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short: expected at least 4 bytes, got {}",
+                data.len()
+            )));
+        }
+
+        let status = data[3];
+
+        // If status == 0x02, it's an ENOENT error
+        if status == 0x02 {
+            return Err(Error::ParamError(format!(
+                "Parameter '{}' does not support persistent_get_state (ENOENT)",
+                name
+            )));
+        }
+
+        let is_stored = status == 1;
+        let value_size = param_info.item_type.byte_length();
+
+        // Parse values from data[4..]
+        if is_stored {
+            // Both default and stored values present
+            if data.len() < 4 + 2 * value_size {
+                return Err(Error::ProtocolError(format!(
+                    "Response too short for stored state: expected {} bytes, got {}",
+                    4 + 2 * value_size,
+                    data.len()
+                )));
+            }
+
+            let default_value = Value::from_le_bytes(&data[4..4 + value_size], param_info.item_type)?;
+            let stored_value = Value::from_le_bytes(&data[4 + value_size..4 + 2 * value_size], param_info.item_type)?;
+
+            Ok(PersistentParamState {
+                is_stored: true,
+                default_value,
+                stored_value: Some(stored_value),
+            })
+        } else {
+            // Only default value present
+            if data.len() < 4 + value_size {
+                return Err(Error::ProtocolError(format!(
+                    "Response too short for default value: expected {} bytes, got {}",
+                    4 + value_size,
+                    data.len()
+                )));
+            }
+
+            let default_value = Value::from_le_bytes(&data[4..4 + value_size], param_info.item_type)?;
+
+            Ok(PersistentParamState {
+                is_stored: false,
+                default_value,
+                stored_value: None,
+            })
+        }
     }
 }
