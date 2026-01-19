@@ -29,6 +29,13 @@ use std::{
 
 use crate::crazyflie::PARAM_PORT;
 
+// MISC channel and commands for persistent parameters
+const MISC_CHANNEL: u8 = 3;
+const MISC_GET_DEFAULT_VALUE: u8 = 6;
+const _MISC_PERSISTENT_STORE: u8 = 3;
+const _MISC_PERSISTENT_CLEAR: u8 = 5;
+const _MISC_PERSISTENT_GET_STATE: u8 = 4;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ParamItemInfo {
     item_type: ValueType,
@@ -78,6 +85,7 @@ pub struct Param {
     uplink: channel::Sender<Packet>,
     read_downlink: channel::Receiver<Packet>,
     write_downlink: Mutex<channel::Receiver<Packet>>,
+    misc_downlink: Mutex<channel::Receiver<Packet>>,
     toc: Arc<BTreeMap<String, (u16, ParamItemInfo)>>,
     values: Arc<Mutex<HashMap<String, Option<Value>>>>,
     watchers: ParamChangeWatchers,
@@ -105,10 +113,14 @@ impl Param {
 
         let toc = crate::crtp_utils::fetch_toc(PARAM_PORT, uplink.clone(), toc_downlink, toc_cache).await?;
 
+        // Create a channel for MISC commands (not param updates)
+        let (misc_cmd_tx, misc_cmd_rx) = channel::unbounded();
+
         let mut param = Self {
             uplink,
             read_downlink,
             write_downlink: Mutex::new(write_downlink),
+            misc_downlink: Mutex::new(misc_cmd_rx),
             toc: Arc::new(toc),
             values: Arc::new(Mutex::new(HashMap::new())),
             watchers: Arc::default(),
@@ -116,7 +128,7 @@ impl Param {
 
         param.initialize_values().await?;
 
-        param.spawn_misc_loop(misc_downlink).await;
+        param.spawn_misc_loop(misc_downlink, misc_cmd_tx).await;
 
         Ok(param)
     }
@@ -152,29 +164,47 @@ impl Param {
         Value::from_le_bytes(&response.get_data()[3..], param_type)
     }
 
-    async fn spawn_misc_loop(&self, misc_downlink: channel::Receiver<Packet>) {
+    async fn spawn_misc_loop(&self, misc_downlink: channel::Receiver<Packet>, misc_cmd_tx: channel::Sender<Packet>) {
         let values = self.values.clone();
         let toc = self.toc.clone();
+        let watchers = self.watchers.clone();
 
         tokio::spawn(async move {
             while let Ok(pk) = misc_downlink.recv_async().await {
-                if pk.get_data()[0] != 1 {
-                    continue;
-                }
+                // Command byte 1 = parameter update notification
+                if pk.get_data().first() == Some(&1) {
+                    // The range sets the buffer to 2 bytes long so this unwrap cannot fail
+                    let param_id = u16::from_le_bytes(pk.get_data()[1..3].try_into().unwrap());
+                    if let Some((param, (_, item_info))) = toc.iter().find(|v| v.1 .0 == param_id) {
+                        if let Ok(value) =
+                            Value::from_le_bytes(&pk.get_data()[3..], item_info.item_type)
+                        {
+                            // The param is tested as being in the toc so this unwrap cannot fail.
+                            *values.lock().await.get_mut(param).unwrap() = Some(value);
+                            
+                            // Notify watchers
+                            let mut to_remove = Vec::new();
+                            let mut watchers_guard = watchers.lock().await;
 
-                // The range sets the buffer to 2 bytes long so this unwrap cannot fail
-                let param_id = u16::from_le_bytes(pk.get_data()[1..3].try_into().unwrap());
-                if let Some((param, (_, item_info))) = toc.iter().find(|v| v.1 .0 == param_id) {
-                    if let Ok(value) =
-                        Value::from_le_bytes(&pk.get_data()[3..], item_info.item_type)
-                    {
-                        // The param is tested as being in the toc so this unwrap cannot fail.
-                        *values.lock().await.get_mut(param).unwrap() = Some(value);
+                            for (i, watcher) in watchers_guard.iter().enumerate() {
+                                if watcher.unbounded_send((param.clone(), value)).is_err() {
+                                    to_remove.push(i);
+                                }
+                            }
+
+                            // Remove watchers that have dropped
+                            for i in to_remove.into_iter().rev() {
+                                watchers_guard.remove(i);
+                            }
+                        } else {
+                            println!("Warning: Malformed param update");
+                        }
                     } else {
-                        println!("Warning: Malformed param update");
+                        println!("Warning: malformed param update");
                     }
                 } else {
-                    println!("Warning: malformed param update");
+                    // Other MISC commands - forward to misc_cmd_tx
+                    let _ = misc_cmd_tx.send_async(pk).await;
                 }
             }
         });
@@ -442,5 +472,76 @@ impl Param {
     pub async fn is_persistent(&self, name: &str) -> Result<bool> {
         let (_, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
         Ok(param_info.persistent)
+    }
+
+    /// Get the default value of a parameter as defined in the firmware
+    ///
+    /// This retrieves the default value that the parameter has in the firmware,
+    /// regardless of whether a different value has been stored in EEPROM.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The parameter does not exist
+    /// - The firmware does not support getting default values for this parameter
+    /// - Communication with the Crazyflie fails
+    pub async fn get_default_value(&self, name: &str) -> Result<Value> {
+        let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+
+        // Send request: [CMD(1), ID(2)]
+        let request = Packet::new(
+            PARAM_PORT,
+            MISC_CHANNEL,
+            vec![
+                MISC_GET_DEFAULT_VALUE,
+                (param_id & 0xff) as u8,
+                (param_id >> 8) as u8,
+            ],
+        );
+
+        self.uplink
+            .send_async(request)
+            .await
+            .map_err(|_| Error::Disconnected)?;
+
+        // Wait for response: [CMD(1), ID(2), VALUE_OR_ERROR(?)]
+        let response = {
+            let misc_downlink = self.misc_downlink.lock().await;
+            misc_downlink
+                .recv_async()
+                .await
+                .map_err(|_| Error::Disconnected)?
+        };
+
+        let data = response.get_data();
+
+        // Response format: [CMD(1), ID(2), VALUE_OR_ERROR(?)]
+        // Verify minimum response length (need at least command + ID)
+        if data.len() < 3 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short: expected at least 3 bytes, got {}",
+                data.len()
+            )));
+        }
+
+        // If we have exactly 4 bytes and byte[3] == 0x02, it's an ENOENT error
+        if data.len() == 4 && data[3] == 0x02 {
+            return Err(Error::ParamError(format!(
+                "Parameter '{}' does not support get_default_value (ENOENT)",
+                name
+            )));
+        }
+
+        // Verify we have enough data for the value
+        if data.len() < 3 + param_info.item_type.byte_length() {
+            return Err(Error::ProtocolError(format!(
+                "Response too short for get_default_value: expected at least {} bytes, got {}",
+                3 + param_info.item_type.byte_length(),
+                data.len()
+            )));
+        }
+
+        // Parse value from data[3..]
+        Value::from_le_bytes(&data[3..], param_info.item_type)
     }
 }
