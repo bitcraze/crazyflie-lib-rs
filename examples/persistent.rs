@@ -23,9 +23,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("Found {} persistent parameters:\n", persistent_params.len());
+    println!("Found {} persistent parameters\n", persistent_params.len());
+
+    // Step 2: Get default values for all persistent parameters
+    println!("=== Persistent Parameters with Default Values ===\n");
+    
     for name in &persistent_params {
-        println!("  {}", name);
+        match cf.param.get_default_value(name).await {
+            Ok(value) => {
+                println!("{}: {:?}", name, value);
+            }
+            Err(_) => {
+                // Skip parameters that don't support get_default_value (e.g., read-only)
+            }
+        }
     }
 
     Ok(())
