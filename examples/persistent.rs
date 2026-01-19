@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 3: Get persistent state
     println!("\n=== Persistent Parameter States ===\n");
     
-    for name in test_params {
+    for name in &test_params {
         match cf.param.persistent_get_state(name).await {
             Ok(state) => {
                 println!("{}:", name);
@@ -61,6 +61,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => {
                 println!("{}: ERROR - {:?}\n", name, e);
             }
+        }
+    }
+
+    // Step 4: Store a value to EEPROM
+    println!("=== Storing a Parameter ===\n");
+    
+    let test_param = "ring.effect";
+    
+    // Get current value
+    let current: u8 = cf.param.get(test_param).await?;
+    println!("Current value of {}: {}", test_param, current);
+    
+    // Set a new value
+    let new_value = 10u8;
+    println!("Setting {} to {}", test_param, new_value);
+    cf.param.set(test_param, new_value).await?;
+    
+    // Store it to EEPROM
+    println!("Storing to EEPROM...");
+    cf.param.persistent_store(test_param).await?;
+    println!("✓ Stored successfully!\n");
+    
+    // Verify it's now marked as stored
+    match cf.param.persistent_get_state(test_param).await {
+        Ok(state) => {
+            println!("Verification:");
+            println!("  Default value: {:?}", state.default_value);
+            if state.is_stored {
+                println!("  Stored value:  {:?} ✓", state.stored_value.unwrap());
+            } else {
+                println!("  Stored: No (using default)");
+            }
+        }
+        Err(e) => {
+            println!("Verification failed: {:?}", e);
         }
     }
 
