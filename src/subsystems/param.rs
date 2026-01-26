@@ -29,13 +29,6 @@ use std::{
 
 use crate::crazyflie::PARAM_PORT;
 
-// MISC channel and commands for persistent parameters
-const MISC_CHANNEL: u8 = 3;
-const MISC_GET_DEFAULT_VALUE: u8 = 6;
-const MISC_PERSISTENT_STORE: u8 = 3;
-const MISC_PERSISTENT_CLEAR: u8 = 5;
-const MISC_PERSISTENT_GET_STATE: u8 = 4;
-
 /// State of a persistent parameter
 #[derive(Debug, Clone)]
 pub struct PersistentParamState {
@@ -51,7 +44,7 @@ pub struct PersistentParamState {
 struct ParamItemInfo {
     item_type: ValueType,
     writable: bool,
-    persistent: bool,
+    has_extended_type: bool, // Bit 4: indicates extended type info exists
 }
 
 impl TryFrom<u8> for ParamItemInfo {
@@ -79,7 +72,7 @@ impl TryFrom<u8> for ParamItemInfo {
                 }
             },
             writable: (value & (1 << 6)) == 0,
-            persistent: (value & (1 << 4)) != 0,
+            has_extended_type: (value & (1 << 4)) != 0,
         })
     }
 }
@@ -108,7 +101,16 @@ fn not_found(name: &str) -> Error {
 
 const READ_CHANNEL: u8 = 1;
 const _WRITE_CHANNEL: u8 = 2;
-const _MISC_CHANNEL: u8 = 3;
+const MISC_CHANNEL: u8 = 3;
+
+// MISC channel and commands for persistent parameters
+const _MISC_GET_EXTENDED_TYPE: u8 = 2; // V1 - deprecated, use V2
+const MISC_PERSISTENT_STORE: u8 = 3;
+const MISC_PERSISTENT_GET_STATE: u8 = 4;
+const MISC_PERSISTENT_CLEAR: u8 = 5;
+const _MISC_GET_DEFAULT_VALUE: u8 = 6; // V1 - deprecated, use V2
+const MISC_GET_EXTENDED_TYPE_V2: u8 = 7;
+const MISC_GET_DEFAULT_VALUE_V2: u8 = 8;
 
 impl Param {
     pub(crate) async fn new<T>(
@@ -477,12 +479,117 @@ impl Param {
     ///
     /// Returns `true` if the parameter can be stored in EEPROM, `false` otherwise.
     ///
+    /// This queries the firmware for the parameter's extended type flags to determine
+    /// if the PERSISTENT flag is set.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the parameter does not exist.
+    /// Returns an error if:
+    /// - The parameter does not exist
+    /// - Communication with the Crazyflie fails
     pub async fn is_persistent(&self, name: &str) -> Result<bool> {
+        // Check if parameter has extended type flag (bit 4)
         let (_, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
-        Ok(param_info.persistent)
+        
+        // If no extended type, it's not persistent
+        if !param_info.has_extended_type {
+            return Ok(false);
+        }
+        
+        // Query the actual extended type flags
+        let extended_type = self.get_extended_type(name).await?;
+        
+        // Check if PERSISTENT flag (bit 0) is set
+        Ok((extended_type & 0x01) != 0)
+    }
+
+    /// Get the extended type flags of a parameter from the firmware
+    ///
+    /// Returns a bitfield of extended type flags. Currently defined flags:
+    /// - `0x01`: PERSISTENT - parameter can be stored in EEPROM
+    ///
+    /// This queries the firmware directly. For most use cases, [`is_persistent()`](Self::is_persistent)
+    /// is more convenient as it reads from the cached TOC.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The parameter does not exist
+    /// - The parameter does not have extended type information
+    /// - Communication with the Crazyflie fails
+    pub async fn get_extended_type(&self, name: &str) -> Result<u8> {
+        let (param_id, _) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+
+        // Send request: [CMD(1), ID(2)]
+        let request = Packet::new(
+            PARAM_PORT,
+            MISC_CHANNEL,
+            vec![
+                MISC_GET_EXTENDED_TYPE_V2,
+                (param_id & 0xff) as u8,
+                (param_id >> 8) as u8,
+            ],
+        );
+
+        self.uplink
+            .send_async(request)
+            .await
+            .map_err(|_| Error::Disconnected)?;
+
+        // Wait for response
+        // V2 success: [CMD(1), ID(2), STATUS(1), EXTENDED_TYPE(1)]
+        // Error: [CMD(1), ID(2), ERROR(1)]
+        let response = {
+            let misc_downlink = self.misc_downlink.lock().await;
+            misc_downlink
+                .recv_async()
+                .await
+                .map_err(|_| Error::Disconnected)?
+        };
+
+        let data = response.get_data();
+
+        // Verify minimum response length
+        if data.len() < 4 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short: expected at least 4 bytes, got {}",
+                data.len()
+            )));
+        }
+
+        // Check if this is an error response (exactly 4 bytes)
+        if data.len() == 4 {
+            let error_code = data[3];
+            if error_code == 0x02 {
+                return Err(Error::ParamError(format!(
+                    "Parameter '{}' does not have extended type (ENOENT)",
+                    name
+                )));
+            } else {
+                return Err(Error::ParamError(format!(
+                    "Failed to get extended type for '{}': error code {}",
+                    name, error_code
+                )));
+            }
+        }
+
+        // V2 success response: [CMD, ID_LOW, ID_HIGH, 0x00, EXTENDED_TYPE]
+        if data.len() < 5 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short for V2 success: expected 5 bytes, got {}",
+                data.len()
+            )));
+        }
+
+        let status = data[3];
+        if status != 0x00 {
+            return Err(Error::ProtocolError(format!(
+                "Unexpected status byte in V2 response: expected 0x00, got 0x{:02x}",
+                status
+            )));
+        }
+
+        Ok(data[4])
     }
 
     /// Get the default value of a parameter as defined in the firmware
@@ -504,7 +611,7 @@ impl Param {
             PARAM_PORT,
             MISC_CHANNEL,
             vec![
-                MISC_GET_DEFAULT_VALUE,
+                MISC_GET_DEFAULT_VALUE_V2,
                 (param_id & 0xff) as u8,
                 (param_id >> 8) as u8,
             ],
@@ -515,7 +622,9 @@ impl Param {
             .await
             .map_err(|_| Error::Disconnected)?;
 
-        // Wait for response: [CMD(1), ID(2), VALUE_OR_ERROR(?)]
+        // Wait for response
+        // V2 success: [CMD(1), ID(2), STATUS(1), VALUE(?)]
+        // Error: [CMD(1), ID(2), ERROR(1)]
         let response = {
             let misc_downlink = self.misc_downlink.lock().await;
             misc_downlink
@@ -526,34 +635,41 @@ impl Param {
 
         let data = response.get_data();
 
-        // Response format: [CMD(1), ID(2), VALUE_OR_ERROR(?)]
-        // Verify minimum response length (need at least command + ID)
-        if data.len() < 3 {
+        // Verify minimum response length
+        if data.len() < 4 {
             return Err(Error::ProtocolError(format!(
-                "Response too short: expected at least 3 bytes, got {}",
+                "Response too short: expected at least 4 bytes, got {}",
                 data.len()
             )));
         }
 
-        // If we have exactly 4 bytes and byte[3] == 0x02, it's an ENOENT error
-        if data.len() == 4 && data[3] == 0x02 {
-            return Err(Error::ParamError(format!(
-                "Parameter '{}' does not support get_default_value (ENOENT)",
-                name
-            )));
+        // Check if this is an error response (exactly 4 bytes)
+        if data.len() == 4 {
+            let error_code = data[3];
+            if error_code == 0x02 {
+                return Err(Error::ParamError(format!(
+                    "Parameter '{}' does not support get_default_value (ENOENT)",
+                    name
+                )));
+            } else {
+                return Err(Error::ParamError(format!(
+                    "Failed to get default value for '{}': error code {}",
+                    name, error_code
+                )));
+            }
         }
 
-        // Verify we have enough data for the value
-        if data.len() < 3 + param_info.item_type.byte_length() {
+        // V2 success response: [CMD, ID_LOW, ID_HIGH, 0x00, VALUE...]
+        let status = data[3];
+        if status != 0x00 {
             return Err(Error::ProtocolError(format!(
-                "Response too short for get_default_value: expected at least {} bytes, got {}",
-                3 + param_info.item_type.byte_length(),
-                data.len()
+                "Unexpected status byte in V2 response: expected 0x00, got 0x{:02x}",
+                status
             )));
         }
 
-        // Parse value from data[3..]
-        Value::from_le_bytes(&data[3..], param_info.item_type)
+        // Parse value from data[4..]
+        Value::from_le_bytes(&data[4..], param_info.item_type)
     }
 
     /// Get the complete state of a persistent parameter
@@ -597,7 +713,7 @@ impl Param {
     pub async fn persistent_get_state(&self, name: &str) -> Result<PersistentParamState> {
         let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
 
-        if !param_info.persistent {
+        if !self.is_persistent(name).await? {
             return Err(Error::ParamError(format!(
                 "Parameter '{}' is not persistent",
                 name
@@ -709,9 +825,9 @@ impl Param {
     /// # }
     /// ```
     pub async fn persistent_store(&self, name: &str) -> Result<()> {
-        let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+        let (param_id, _) = self.toc.get(name).ok_or_else(|| not_found(name))?;
 
-        if !param_info.persistent {
+        if !self.is_persistent(name).await? {
             return Err(Error::ParamError(format!(
                 "Parameter '{}' is not persistent",
                 name
@@ -779,9 +895,9 @@ impl Param {
     /// # }
     /// ```
     pub async fn persistent_clear(&self, name: &str) -> Result<()> {
-        let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+        let (param_id, _) = self.toc.get(name).ok_or_else(|| not_found(name))?;
 
-        if !param_info.persistent {
+        if !self.is_persistent(name).await? {
             return Err(Error::ParamError(format!(
                 "Parameter '{}' is not persistent",
                 name
