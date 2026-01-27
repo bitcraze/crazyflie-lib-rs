@@ -143,7 +143,10 @@ impl Crazyflie {
         if !(SUPPORTED_PROTOCOL_VERSION..=(SUPPORTED_PROTOCOL_VERSION + 1))
             .contains(&protocol_version)
         {
-            return Err(Error::ProtocolVersionNotSupported);
+            return Err(Error::ProtocolVersionNotSupported {
+                expected: SUPPORTED_PROTOCOL_VERSION,
+                found: protocol_version,
+            });
         }
 
         // Create subsystems one by one
