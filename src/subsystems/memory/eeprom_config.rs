@@ -77,7 +77,7 @@ impl FromMemoryBackend for EEPROMConfigMemory {
         }
     }
 
-    fn close_memory(self) -> MemoryBackend {
+    fn close_memory(self) -> MemoryBackend{
       self.memory
     }
 }
