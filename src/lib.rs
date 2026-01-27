@@ -23,7 +23,9 @@
 //!
 //! ## Compatibility
 //!
-//! This crate is compatible with Crazyflie protocol version >= [`SUPPORTED_PROTOCOL_VERSION`].
+//! This crate is compatible with Crazyflie protocol versions [`MIN_SUPPORTED_PROTOCOL_VERSION`]
+//! to [`MAX_SUPPORTED_PROTOCOL_VERSION`]. The Crazyflie guarantees backward compatibility for one
+//! protocol version, so this library will work with both the current and next protocol version.
 //!
 //! ## Usage
 //!
@@ -86,7 +88,12 @@ pub use crate::value::{Value, ValueType};
 pub use crate::crtp_utils::TocCache;
 pub use crate::crtp_utils::NoTocCache;
 
-/// Supported protocol version
+/// Minimum supported protocol version
 ///
 /// see [the crate documentation](crate#compatibility) for more information.
-pub const SUPPORTED_PROTOCOL_VERSION: u8 = 10;
+pub const MIN_SUPPORTED_PROTOCOL_VERSION: u8 = 10;
+
+/// Maximum supported protocol version
+///
+/// see [the crate documentation](crate#compatibility) for more information.
+pub const MAX_SUPPORTED_PROTOCOL_VERSION: u8 = MIN_SUPPORTED_PROTOCOL_VERSION + 1;

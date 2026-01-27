@@ -9,7 +9,7 @@ use crate::subsystems::param::Param;
 use crate::crtp_utils::{CrtpDispatch, TocCache};
 use crate::subsystems::platform::Platform;
 use crate::{Error, Result};
-use crate::SUPPORTED_PROTOCOL_VERSION;
+use crate::{MIN_SUPPORTED_PROTOCOL_VERSION, MAX_SUPPORTED_PROTOCOL_VERSION};
 use flume as channel;
 use futures::lock::Mutex;
 use tokio::task::JoinHandle;
@@ -140,11 +140,12 @@ impl Crazyflie {
 
         let protocol_version = platform.protocol_version().await?;
 
-        if !(SUPPORTED_PROTOCOL_VERSION..=(SUPPORTED_PROTOCOL_VERSION + 1))
+        if !(MIN_SUPPORTED_PROTOCOL_VERSION..=MAX_SUPPORTED_PROTOCOL_VERSION)
             .contains(&protocol_version)
         {
             return Err(Error::ProtocolVersionNotSupported {
-                expected: SUPPORTED_PROTOCOL_VERSION,
+                min_supported: MIN_SUPPORTED_PROTOCOL_VERSION,
+                max_supported: MAX_SUPPORTED_PROTOCOL_VERSION,
                 found: protocol_version,
             });
         }

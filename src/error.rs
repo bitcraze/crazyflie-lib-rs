@@ -13,8 +13,10 @@ pub enum Error {
     ///
     /// see [the crate documentation](crate#compatibility) for more information.
     ProtocolVersionNotSupported {
-        /// The protocol version expected by this library
-        expected: u8,
+        /// The minimum protocol version supported by this library
+        min_supported: u8,
+        /// The maximum protocol version supported by this library
+        max_supported: u8,
         /// The protocol version found on the Crazyflie
         found: u8,
     },
@@ -50,8 +52,8 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::ProtocolVersionNotSupported { expected, found } => {
-                write!(f, "Protocol version not supported: expected {}, found {}", expected, found)
+            Error::ProtocolVersionNotSupported { min_supported, max_supported, found } => {
+                write!(f, "Protocol version not supported: supported range is {}-{}, found {}", min_supported, max_supported, found)
             }
             Error::ProtocolError(msg) => write!(f, "Protocol error: {}", msg),
             Error::ParamError(msg) => write!(f, "Parameter error: {}", msg),
