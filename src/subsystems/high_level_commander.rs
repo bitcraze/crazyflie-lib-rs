@@ -6,7 +6,6 @@
 
 use crazyflie_link::Packet;
 use flume::Sender;
-use tokio::time::{sleep, Duration};
 
 use crate::{Error, Result};
 
@@ -48,10 +47,11 @@ pub const TRAJECTORY_TYPE_POLY4D_COMPRESSED: u8 = 1;
 ///
 /// # Command execution model
 /// Movement commands ([`take_off`](Self::take_off), [`land`](Self::land),
-/// [`go_to`](Self::go_to), [`spiral`](Self::spiral)) immediately trigger execution
-/// on the Crazyflie and then block for their `duration` to simplify command sequencing.
-/// The Crazyflie executes these commands autonomously—if the Rust future is cancelled
-/// or the connection drops, the drone will continue executing the command until completion.
+/// [`go_to`](Self::go_to), [`spiral`](Self::spiral)) return immediately after sending
+/// the command to the Crazyflie. The caller is responsible for waiting the appropriate
+/// duration before issuing the next command. The Crazyflie executes these commands
+/// autonomously—if the connection drops, the drone will continue executing the command
+/// until completion.
 ///
 /// # Notes
 /// The high-level commander can be preempted at any time by setpoints from the commander.
@@ -127,7 +127,7 @@ impl HighLevelCommander {
     /// # Arguments
     /// * `height` - Target height (meters) above the world origin.
     /// * `yaw` - Target yaw (radians). Use `None` to maintain the current yaw.
-    /// * `duration` - Time (seconds) to reach the target height. This method blocks for this duration.
+    /// * `duration` - Time (seconds) to reach the target height.
     /// * `group_mask` - Bitmask selecting which Crazyflies to command. Use `None` for all Crazyflies.
     pub async fn take_off(&self, height: f32, yaw: Option<f32>, duration: f32, group_mask: Option<u8>) -> Result<()> {
         let use_current_yaw = yaw.is_none();
@@ -150,7 +150,6 @@ impl HighLevelCommander {
             .await
            .map_err(|_| Error::Disconnected)?;
 
-        sleep(Duration::from_secs_f32(duration)).await;
         Ok(())
     }
 
@@ -159,7 +158,7 @@ impl HighLevelCommander {
     /// # Arguments
     /// * `height` - Target height (meters) above the world origin.
     /// * `yaw` - Target yaw (radians). Use `None` to maintain the current yaw.
-    /// * `duration` - Time (seconds) to reach the target height. This method blocks for this duration.
+    /// * `duration` - Time (seconds) to reach the target height.
     /// * `group_mask` - Bitmask selecting which Crazyflies to command. Use `None` for all Crazyflies.
     pub async fn land(&self, height: f32, yaw: Option<f32>, duration: f32, group_mask: Option<u8>) -> Result<()> {
         let use_current_yaw = yaw.is_none();
@@ -182,7 +181,6 @@ impl HighLevelCommander {
             .await
             .map_err(|_| Error::Disconnected)?;
 
-        sleep(Duration::from_secs_f32(duration)).await;
         Ok(())
     }
 
@@ -227,7 +225,7 @@ impl HighLevelCommander {
     /// * `y` - Target y-position in meters
     /// * `z` - Target z-position in meters
     /// * `yaw` - Target yaw angle in radians
-    /// * `duration` - Time in seconds to reach the target position. This method blocks for this duration.
+    /// * `duration` - Time in seconds to reach the target position.
     /// * `relative` - If `true`, positions and yaw are relative to current position; if `false`, absolute
     /// * `linear` - If `true`, use linear interpolation; if `false`, use polynomial trajectory
     /// * `group_mask` - Bitmask selecting which Crazyflies to command. Use `None` for all Crazyflies.
@@ -252,7 +250,6 @@ impl HighLevelCommander {
             .await
             .map_err(|_| Error::Disconnected)?;
 
-        sleep(Duration::from_secs_f32(duration)).await;
         Ok(())
     }
 
@@ -294,7 +291,7 @@ impl HighLevelCommander {
     /// * `final_radius` - Ending radius in meters (≥ 0).
     /// * `altitude_gain` - Vertical displacement in meters (positive = climb,
     ///   negative = descent).
-    /// * `duration` - Time in seconds to complete the spiral. This method blocks for this duration.
+    /// * `duration` - Time in seconds to complete the spiral.
     /// * `sideways` - If `true`, heading points toward the spiral center;
     ///   if `false`, heading follows the spiral tangent.
     /// * `clockwise` - If `true`, fly clockwise; otherwise counter-clockwise.
@@ -335,7 +332,6 @@ impl HighLevelCommander {
             .await
             .map_err(|_| Error::Disconnected)?;
 
-        sleep(Duration::from_secs_f32(duration)).await;
         Ok(())
     }
 }
