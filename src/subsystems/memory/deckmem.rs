@@ -67,7 +67,7 @@ impl FromMemoryBackend for DeckMemory {
                 Error::MemoryError(format!("Multiple references to memory"))
             })
             .map(|mutex| mutex.into_inner())
-            .expect("Failed to close memory")
+            .expect("Multiple reference to sections still held")
     }
 }
 
