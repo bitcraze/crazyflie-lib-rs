@@ -136,13 +136,13 @@ impl Console {
         let history_buffer = buffer.clone();
         let history_stream = futures::stream::once(async { history_buffer }).boxed();
 
-        history_stream.chain(self.stream_broadcast_receiver.clone())
+        history_stream.chain(self.stream_broadcast_receiver.new_receiver())
     }
 
     /// Version of [Console::stream()] but that does not produce the history
     /// first.
     pub async fn stream_no_history(&self) -> impl Stream<Item = String> + use<> {
-        self.stream_broadcast_receiver.clone()
+        self.stream_broadcast_receiver.new_receiver()
     }
 
     /// Return a [Stream] that generate a [String] each time a line is received
@@ -159,12 +159,12 @@ impl Console {
         let history_lines = lines.clone();
         let history_stream = futures::stream::iter(history_lines.into_iter()).boxed();
 
-        history_stream.chain(self.line_broadcast_receiver.clone())
+        history_stream.chain(self.line_broadcast_receiver.new_receiver())
     }
 
     /// Version of [Console::line_stream()] but that does not produce the history
     /// first.
     pub async fn line_stream_no_history(&self) -> impl Stream<Item = String> + use<> {
-        self.line_broadcast_receiver.clone()
+        self.line_broadcast_receiver.new_receiver()
     }
 }
