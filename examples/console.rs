@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-        let mut console_stream = cf.console.line_stream_no_history().await;
+        let mut console_stream = cf.console.line_stream().await;
 
         while let Ok(Some(line)) = timeout(Duration::from_secs(10), console_stream.next()).await {
             println!("{}", line);
