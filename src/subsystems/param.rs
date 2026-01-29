@@ -520,7 +520,8 @@ impl Param {
     /// - `0x01`: PERSISTENT - parameter can be stored in EEPROM
     ///
     /// This queries the firmware directly. For most use cases, [`is_persistent()`](Self::is_persistent)
-    /// is more convenient as it reads from the cached TOC.
+    /// is more convenient as it provides a boolean result and first checks the TOC's
+    /// `has_extended_type` flag before querying the firmware.
     ///
     /// # Errors
     ///
