@@ -572,8 +572,9 @@ impl Param {
         if data.len() == 4 {
             let error_code = data[3];
             if error_code == 0x02 {
+                // ENOENT: parameter ID invalid OR parameter doesn't have PARAM_EXTENDED flag
                 return Err(Error::ParamError(format!(
-                    "Parameter '{}' does not have extended type (ENOENT)",
+                    "Parameter '{}' does not have extended type info (not marked as PARAM_EXTENDED in firmware)",
                     name
                 )));
             } else {
@@ -622,7 +623,7 @@ impl Param {
                 return match cached {
                     DefaultValueCache::Value(v) => Ok(*v),
                     DefaultValueCache::Unsupported => Err(Error::ParamError(format!(
-                        "Parameter '{}' does not support get_default_value (ENOENT)",
+                        "Parameter '{}' does not support get_default_value (read-only or invalid)",
                         name
                     ))),
                 };
@@ -672,12 +673,14 @@ impl Param {
         if data.len() == 4 {
             let error_code = data[3];
             if error_code == 0x02 {
+                // ENOENT: parameter ID invalid OR parameter is read-only
+                // (read-only params have no default value concept in firmware)
                 // Cache the unsupported state so we don't query again
                 let mut cache = self.default_values.lock().await;
                 cache.insert(name.to_owned(), DefaultValueCache::Unsupported);
 
                 return Err(Error::ParamError(format!(
-                    "Parameter '{}' does not support get_default_value (ENOENT)",
+                    "Parameter '{}' does not support get_default_value (read-only or invalid)",
                     name
                 )));
             } else {
@@ -918,13 +921,20 @@ impl Param {
 
         let status = data[3];
 
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(Error::ParamError(format!(
-                "Failed to store parameter '{}': status code {}",
-                name, status
-            )))
+        match status {
+            0x00 => Ok(()),
+            0x02 => {
+                // ENOENT: storage operation failed (couldn't write to EEPROM)
+                // or parameter ID invalid (shouldn't happen since we verified the ID)
+                Err(Error::ParamError(format!(
+                    "Failed to store parameter '{}' to EEPROM (storage write failed)",
+                    name
+                )))
+            }
+            _ => Err(Error::ProtocolError(format!(
+                "Unexpected status code {} in persistent_store response for '{}'",
+                status, name
+            ))),
         }
     }
 
@@ -988,13 +998,20 @@ impl Param {
 
         let status = data[3];
 
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(Error::ParamError(format!(
-                "Failed to clear parameter '{}': status code {}",
-                name, status
-            )))
+        match status {
+            0x00 => Ok(()),
+            0x02 => {
+                // ENOENT: storage delete failed (couldn't delete from EEPROM)
+                // or parameter ID invalid (shouldn't happen since we verified the ID)
+                Err(Error::ParamError(format!(
+                    "Failed to clear parameter '{}' from EEPROM (storage delete failed)",
+                    name
+                )))
+            }
+            _ => Err(Error::ProtocolError(format!(
+                "Unexpected status code {} in persistent_clear response for '{}'",
+                status, name
+            ))),
         }
     }
 }
