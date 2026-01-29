@@ -40,6 +40,15 @@ pub struct PersistentParamState {
     pub stored_value: Option<Value>,
 }
 
+/// Cached state for a parameter's default value.
+#[derive(Debug, Clone, Copy)]
+enum DefaultValueCache {
+    /// Parameter has this default value
+    Value(Value),
+    /// Parameter doesn't support default value fetching (ENOENT)
+    Unsupported,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ParamItemInfo {
     item_type: ValueType,
@@ -92,6 +101,7 @@ pub struct Param {
     misc_downlink: Mutex<channel::Receiver<Packet>>,
     toc: Arc<BTreeMap<String, (u16, ParamItemInfo)>>,
     values: Arc<Mutex<HashMap<String, Option<Value>>>>,
+    default_values: Arc<Mutex<HashMap<String, DefaultValueCache>>>,
     watchers: ParamChangeWatchers,
 }
 
@@ -136,6 +146,7 @@ impl Param {
             misc_downlink: Mutex::new(misc_cmd_rx),
             toc: Arc::new(toc),
             values: Arc::new(Mutex::new(HashMap::new())),
+            default_values: Arc::new(Mutex::new(HashMap::new())),
             watchers: Arc::default(),
         };
 
@@ -604,6 +615,20 @@ impl Param {
     /// - The firmware does not support getting default values for this parameter
     /// - Communication with the Crazyflie fails
     pub async fn get_default_value(&self, name: &str) -> Result<Value> {
+        // Check cache first
+        {
+            let cache = self.default_values.lock().await;
+            if let Some(cached) = cache.get(name) {
+                return match cached {
+                    DefaultValueCache::Value(v) => Ok(*v),
+                    DefaultValueCache::Unsupported => Err(Error::ParamError(format!(
+                        "Parameter '{}' does not support get_default_value (ENOENT)",
+                        name
+                    ))),
+                };
+            }
+        }
+
         let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
 
         // Send request: [CMD(1), ID(2)]
@@ -647,6 +672,10 @@ impl Param {
         if data.len() == 4 {
             let error_code = data[3];
             if error_code == 0x02 {
+                // Cache the unsupported state so we don't query again
+                let mut cache = self.default_values.lock().await;
+                cache.insert(name.to_owned(), DefaultValueCache::Unsupported);
+
                 return Err(Error::ParamError(format!(
                     "Parameter '{}' does not support get_default_value (ENOENT)",
                     name
@@ -668,8 +697,15 @@ impl Param {
             )));
         }
 
-        // Parse value from data[4..]
-        Value::from_le_bytes(&data[4..], param_info.item_type)
+        // Parse value from data[4..] and cache it
+        let value = Value::from_le_bytes(&data[4..], param_info.item_type)?;
+
+        {
+            let mut cache = self.default_values.lock().await;
+            cache.insert(name.to_owned(), DefaultValueCache::Value(value));
+        }
+
+        Ok(value)
     }
 
     /// Get the complete state of a persistent parameter
