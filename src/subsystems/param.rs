@@ -542,6 +542,9 @@ impl Param {
             ],
         );
 
+        // Lock before sending to prevent race conditions with concurrent requests
+        let misc_downlink = self.misc_downlink.lock().await;
+
         self.uplink
             .send_async(request)
             .await
@@ -550,13 +553,10 @@ impl Param {
         // Wait for response
         // V2 success: [CMD(1), ID(2), STATUS(1), EXTENDED_TYPE(1)]
         // Error: [CMD(1), ID(2), ERROR(1)]
-        let response = {
-            let misc_downlink = self.misc_downlink.lock().await;
-            misc_downlink
-                .recv_async()
-                .await
-                .map_err(|_| Error::Disconnected)?
-        };
+        let response = misc_downlink
+            .recv_async()
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
         let data = response.get_data();
 
@@ -643,6 +643,9 @@ impl Param {
             ],
         );
 
+        // Lock before sending to prevent race conditions with concurrent requests
+        let misc_downlink = self.misc_downlink.lock().await;
+
         self.uplink
             .send_async(request)
             .await
@@ -651,13 +654,10 @@ impl Param {
         // Wait for response
         // V2 success: [CMD(1), ID(2), STATUS(1), VALUE(?)]
         // Error: [CMD(1), ID(2), ERROR(1)]
-        let response = {
-            let misc_downlink = self.misc_downlink.lock().await;
-            misc_downlink
-                .recv_async()
-                .await
-                .map_err(|_| Error::Disconnected)?
-        };
+        let response = misc_downlink
+            .recv_async()
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
         let data = response.get_data();
 
@@ -770,19 +770,19 @@ impl Param {
             ],
         );
 
+        // Lock before sending to prevent race conditions with concurrent requests
+        let misc_downlink = self.misc_downlink.lock().await;
+
         self.uplink
             .send_async(request)
             .await
             .map_err(|_| Error::Disconnected)?;
 
         // Wait for response: [CMD(1), ID(2), STATUS(1), VALUE_DATA(?)]
-        let response = {
-            let misc_downlink = self.misc_downlink.lock().await;
-            misc_downlink
-                .recv_async()
-                .await
-                .map_err(|_| Error::Disconnected)?
-        };
+        let response = misc_downlink
+            .recv_async()
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
         let data = response.get_data();
 
@@ -895,19 +895,19 @@ impl Param {
             ],
         );
 
+        // Lock before sending to prevent race conditions with concurrent requests
+        let misc_downlink = self.misc_downlink.lock().await;
+
         self.uplink
             .send_async(request)
             .await
             .map_err(|_| Error::Disconnected)?;
 
         // Wait for response: [CMD(1), ID(2), STATUS(1)]
-        let response = {
-            let misc_downlink = self.misc_downlink.lock().await;
-            misc_downlink
-                .recv_async()
-                .await
-                .map_err(|_| Error::Disconnected)?
-        };
+        let response = misc_downlink
+            .recv_async()
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
         let data = response.get_data();
 
@@ -972,19 +972,19 @@ impl Param {
             ],
         );
 
+        // Lock before sending to prevent race conditions with concurrent requests
+        let misc_downlink = self.misc_downlink.lock().await;
+
         self.uplink
             .send_async(request)
             .await
             .map_err(|_| Error::Disconnected)?;
 
         // Wait for response: [CMD(1), ID(2), STATUS(1)]
-        let response = {
-            let misc_downlink = self.misc_downlink.lock().await;
-            misc_downlink
-                .recv_async()
-                .await
-                .map_err(|_| Error::Disconnected)?
-        };
+        let response = misc_downlink
+            .recv_async()
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
         let data = response.get_data();
 
