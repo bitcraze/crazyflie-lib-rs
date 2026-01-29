@@ -794,15 +794,26 @@ impl Param {
 
         let status = data[3];
 
-        // If status == 0x02, it's an ENOENT error
-        if status == 0x02 {
-            return Err(Error::ParamError(format!(
-                "Parameter '{}' does not support persistent_get_state (ENOENT)",
-                name
-            )));
-        }
-
-        let is_stored = status == 1;
+        // Validate status code:
+        // 0x00 = PARAM_PERSISTENT_NOT_STORED (no value in persistent storage)
+        // 0x01 = PARAM_PERSISTENT_STORED (value exists in persistent storage)
+        // 0x02 = ENOENT (parameter ID doesn't exist in firmware)
+        let is_stored = match status {
+            0x00 => false,
+            0x01 => true,
+            0x02 => {
+                return Err(Error::ParamError(format!(
+                    "Parameter ID for '{}' is invalid or doesn't exist in firmware (ENOENT)",
+                    name
+                )));
+            }
+            _ => {
+                return Err(Error::ProtocolError(format!(
+                    "Unexpected status code {} in persistent_get_state response for '{}'",
+                    status, name
+                )));
+            }
+        };
         let value_size = param_info.item_type.byte_length();
 
         // Parse values from data[4..]
