@@ -14,7 +14,7 @@ use memory_types::{FromMemoryBackend, MemoryType};
 fn encode_spatial(coordinate: f32) -> Result<i16> {
     let scaled = coordinate * 1000.0;
     if scaled < i16::MIN as f32 || scaled > i16::MAX as f32 {
-        return Err(Error::TrajectoryError(
+        return Err(Error::InvalidArgument(
             format!("Spatial coordinate {:.3}m out of representable range ({:.3}m to {:.3}m)",
                 coordinate, i16::MIN as f32 / 1000.0, i16::MAX as f32 / 1000.0)
         ));
@@ -28,7 +28,7 @@ fn encode_spatial(coordinate: f32) -> Result<i16> {
 fn encode_yaw(angle_rad: f32) -> Result<i16> {
     let scaled = angle_rad.to_degrees() * 10.0;
     if scaled < i16::MIN as f32 || scaled > i16::MAX as f32 {
-        return Err(Error::TrajectoryError(
+        return Err(Error::InvalidArgument(
             format!("Yaw angle {:.3} rad out of representable range", angle_rad)
         ));
     }
@@ -88,17 +88,6 @@ impl Poly4D {
     /// Create a new Poly4D trajectory segment
     pub fn new(duration: f32, x: Poly, y: Poly, z: Poly, yaw: Poly) -> Self {
         Self { duration, x, y, z, yaw }
-    }
-
-    /// Create a new Poly4D with default (zero) polynomials
-    pub fn with_duration(duration: f32) -> Self {
-        Self {
-            duration,
-            x: Poly::default(),
-            y: Poly::default(),
-            z: Poly::default(),
-            yaw: Poly::default(),
-        }
     }
 
     /// Pack this segment into bytes for transmission
@@ -197,16 +186,11 @@ impl ElementType {
 /// of motion along that axis.
 #[derive(Debug, Clone)]
 pub struct CompressedSegment {
-    /// Duration of this segment in seconds
-    pub duration: f32,
-    /// X polynomial coefficients (0, 1, 3, or 7 elements)
-    pub x: Vec<f32>,
-    /// Y polynomial coefficients (0, 1, 3, or 7 elements)
-    pub y: Vec<f32>,
-    /// Z polynomial coefficients (0, 1, 3, or 7 elements)
-    pub z: Vec<f32>,
-    /// Yaw polynomial coefficients (0, 1, 3, or 7 elements)
-    pub yaw: Vec<f32>,
+    duration: f32,
+    x: Vec<f32>,
+    y: Vec<f32>,
+    z: Vec<f32>,
+    yaw: Vec<f32>,
 }
 
 impl CompressedSegment {
@@ -233,7 +217,7 @@ impl CompressedSegment {
     fn validate(element: &[f32]) -> Result<()> {
         let len = element.len();
         if len != 0 && len != 1 && len != 3 && len != 7 {
-            return Err(Error::TrajectoryError(
+            return Err(Error::InvalidArgument(
                 "Element length must be 0, 1, 3, or 7".to_owned()
             ));
         }
@@ -241,6 +225,7 @@ impl CompressedSegment {
     }
 
     fn encode_type(element: &[f32]) -> u8 {
+        // Safe: fields are validated in new()
         ElementType::from_len(element.len()).unwrap() as u8
     }
 
@@ -283,36 +268,12 @@ impl CompressedSegment {
     }
 }
 
-/// A trajectory element that can be packed for transmission
-pub trait TrajectoryElement {
-    /// Pack this element into bytes for transmission
-    fn pack_to_bytes(&self) -> Result<Vec<u8>>;
-}
-
-impl TrajectoryElement for Poly4D {
-    fn pack_to_bytes(&self) -> Result<Vec<u8>> {
-        Ok(self.pack())
-    }
-}
-
-impl TrajectoryElement for CompressedStart {
-    fn pack_to_bytes(&self) -> Result<Vec<u8>> {
-        self.pack()
-    }
-}
-
-impl TrajectoryElement for CompressedSegment {
-    fn pack_to_bytes(&self) -> Result<Vec<u8>> {
-        self.pack()
-    }
-}
-
 /// Memory interface for trajectories used by the high level commander
 ///
 /// Trajectories can be either uncompressed (using `Poly4D` segments) or
 /// compressed (using `CompressedStart` followed by `CompressedSegment`s).
-/// It is not possible to mix uncompressed and compressed elements in the
-/// same trajectory.
+/// Use `write_uncompressed` for Poly4D trajectories and `write_compressed`
+/// for compressed trajectories.
 #[derive(Debug)]
 pub struct TrajectoryMemory {
     memory: MemoryBackend,
@@ -341,51 +302,105 @@ impl FromMemoryBackend for TrajectoryMemory {
 }
 
 impl TrajectoryMemory {
-    /// Write trajectory data to the Crazyflie
+    /// Write an uncompressed trajectory (Poly4D segments) to the Crazyflie
     ///
     /// # Arguments
-    /// * `trajectory` - A slice of trajectory elements to write
+    /// * `segments` - A slice of Poly4D trajectory segments
     /// * `start_addr` - The address in trajectory memory to upload to (0 by default)
     ///
     /// # Returns
     /// The number of bytes written
-    pub async fn write_trajectory<T: TrajectoryElement>(
+    pub async fn write_uncompressed(
         &self,
-        trajectory: &[T],
+        segments: &[Poly4D],
         start_addr: usize,
     ) -> Result<usize> {
         let mut data = Vec::new();
-        for element in trajectory {
-            data.extend(element.pack_to_bytes()?);
+        for segment in segments {
+            data.extend(segment.pack());
         }
 
         self.memory.write::<fn(usize, usize)>(start_addr, &data, None).await?;
         Ok(data.len())
     }
 
-    /// Write trajectory data to the Crazyflie with progress reporting
+    /// Write an uncompressed trajectory with progress reporting
     ///
     /// # Arguments
-    /// * `trajectory` - A slice of trajectory elements to write
+    /// * `segments` - A slice of Poly4D trajectory segments
     /// * `start_addr` - The address in trajectory memory to upload to (0 by default)
-    /// * `progress_callback` - A callback function that takes two usize arguments:
-    ///   the number of bytes written so far and the total number of bytes to write
+    /// * `progress_callback` - Called with (bytes_written, total_bytes)
     ///
     /// # Returns
     /// The number of bytes written
-    pub async fn write_trajectory_with_progress<T, F>(
+    pub async fn write_uncompressed_with_progress<F>(
         &self,
-        trajectory: &[T],
+        segments: &[Poly4D],
         start_addr: usize,
         progress_callback: F,
     ) -> Result<usize>
     where
-        T: TrajectoryElement,
         F: FnMut(usize, usize),
     {
         let mut data = Vec::new();
-        for element in trajectory {
-            data.extend(element.pack_to_bytes()?);
+        for segment in segments {
+            data.extend(segment.pack());
+        }
+
+        self.memory.write(start_addr, &data, Some(progress_callback)).await?;
+        Ok(data.len())
+    }
+
+    /// Write a compressed trajectory to the Crazyflie
+    ///
+    /// Compressed trajectories must start with a `CompressedStart` followed
+    /// by zero or more `CompressedSegment`s.
+    ///
+    /// # Arguments
+    /// * `start` - The starting point of the trajectory
+    /// * `segments` - A slice of compressed trajectory segments
+    /// * `start_addr` - The address in trajectory memory to upload to (0 by default)
+    ///
+    /// # Returns
+    /// The number of bytes written
+    pub async fn write_compressed(
+        &self,
+        start: &CompressedStart,
+        segments: &[CompressedSegment],
+        start_addr: usize,
+    ) -> Result<usize> {
+        let mut data = start.pack()?;
+        for segment in segments {
+            data.extend(segment.pack()?);
+        }
+
+        self.memory.write::<fn(usize, usize)>(start_addr, &data, None).await?;
+        Ok(data.len())
+    }
+
+    /// Write a compressed trajectory with progress reporting
+    ///
+    /// # Arguments
+    /// * `start` - The starting point of the trajectory
+    /// * `segments` - A slice of compressed trajectory segments
+    /// * `start_addr` - The address in trajectory memory to upload to (0 by default)
+    /// * `progress_callback` - Called with (bytes_written, total_bytes)
+    ///
+    /// # Returns
+    /// The number of bytes written
+    pub async fn write_compressed_with_progress<F>(
+        &self,
+        start: &CompressedStart,
+        segments: &[CompressedSegment],
+        start_addr: usize,
+        progress_callback: F,
+    ) -> Result<usize>
+    where
+        F: FnMut(usize, usize),
+    {
+        let mut data = start.pack()?;
+        for segment in segments {
+            data.extend(segment.pack()?);
         }
 
         self.memory.write(start_addr, &data, Some(progress_callback)).await?;

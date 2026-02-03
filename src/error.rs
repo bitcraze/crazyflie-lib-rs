@@ -47,8 +47,6 @@ pub enum Error {
     MemoryError(String),
     /// Invalid parameter provided to a function. The String contains the reason.
     InvalidParameter(String),
-    /// Trajectory data error. The String contains the reason.
-    TrajectoryError(String),
 }
 
 impl std::fmt::Display for Error {
@@ -70,7 +68,6 @@ impl std::fmt::Display for Error {
             Error::Timeout => write!(f, "Operation timed out"),
             Error::MemoryError(msg) => write!(f, "Memory error: {}", msg),
             Error::InvalidParameter(msg) => write!(f, "Invalid parameter: {}", msg),
-            Error::TrajectoryError(msg) => write!(f, "Trajectory error: {}", msg),
         }
     }
 }
