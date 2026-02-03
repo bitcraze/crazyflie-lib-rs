@@ -20,6 +20,7 @@ mod eeprom_config;
 mod deckmem;
 mod raw;
 mod ow;
+mod trajectory;
 
 use crate::crazyflie::MEMORY_PORT;
 
@@ -28,6 +29,7 @@ pub use eeprom_config::*;
 pub use deckmem::*;
 pub use raw::*;
 pub use ow::*;
+pub use trajectory::*;
 
 /// # Access to the Crazyflie Memory Subsystem
 ///
