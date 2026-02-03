@@ -8,6 +8,33 @@
 use crate::{Error, Result, subsystems::memory::{MemoryBackend, memory_types}};
 use memory_types::{FromMemoryBackend, MemoryType};
 
+/// Encode a spatial coordinate (meters) to millimeters as i16
+///
+/// Valid range: approximately -32.767 to +32.767 meters
+fn encode_spatial(coordinate: f32) -> Result<i16> {
+    let scaled = coordinate * 1000.0;
+    if scaled < i16::MIN as f32 || scaled > i16::MAX as f32 {
+        return Err(Error::TrajectoryError(
+            format!("Spatial coordinate {:.3}m out of representable range ({:.3}m to {:.3}m)",
+                coordinate, i16::MIN as f32 / 1000.0, i16::MAX as f32 / 1000.0)
+        ));
+    }
+    Ok(scaled as i16)
+}
+
+/// Encode a yaw angle (radians) to 1/10th degrees as i16
+///
+/// Valid range: approximately -573.2 to +573.2 degrees (-10.0 to +10.0 radians)
+fn encode_yaw(angle_rad: f32) -> Result<i16> {
+    let scaled = angle_rad.to_degrees() * 10.0;
+    if scaled < i16::MIN as f32 || scaled > i16::MAX as f32 {
+        return Err(Error::TrajectoryError(
+            format!("Yaw angle {:.3} rad out of representable range", angle_rad)
+        ));
+    }
+    Ok(scaled as i16)
+}
+
 /// A polynomial with up to 8 coefficients
 #[derive(Debug, Clone)]
 pub struct Poly {
@@ -123,26 +150,18 @@ impl CompressedStart {
         Self { x, y, z, yaw }
     }
 
-    /// Encode a spatial coordinate (meters) to millimeters as i16
-    fn encode_spatial(coordinate: f32) -> i16 {
-        (coordinate * 1000.0) as i16
-    }
-
-    /// Encode a yaw angle (radians) to 1/10th degrees as i16
-    fn encode_yaw(angle_rad: f32) -> i16 {
-        (angle_rad.to_degrees() * 10.0) as i16
-    }
-
     /// Pack this start point into bytes for transmission
-    pub fn pack(&self) -> Vec<u8> {
+    ///
+    /// Returns an error if any coordinate is out of the representable range.
+    pub fn pack(&self) -> Result<Vec<u8>> {
         let mut data = Vec::with_capacity(8);
 
-        data.extend_from_slice(&Self::encode_spatial(self.x).to_le_bytes());
-        data.extend_from_slice(&Self::encode_spatial(self.y).to_le_bytes());
-        data.extend_from_slice(&Self::encode_spatial(self.z).to_le_bytes());
-        data.extend_from_slice(&Self::encode_yaw(self.yaw).to_le_bytes());
+        data.extend_from_slice(&encode_spatial(self.x)?.to_le_bytes());
+        data.extend_from_slice(&encode_spatial(self.y)?.to_le_bytes());
+        data.extend_from_slice(&encode_spatial(self.z)?.to_le_bytes());
+        data.extend_from_slice(&encode_yaw(self.yaw)?.to_le_bytes());
 
-        data
+        Ok(data)
     }
 }
 
@@ -225,35 +244,27 @@ impl CompressedSegment {
         ElementType::from_len(element.len()).unwrap() as u8
     }
 
-    /// Encode a spatial coordinate (meters) to millimeters as i16
-    fn encode_spatial(coordinate: f32) -> i16 {
-        (coordinate * 1000.0) as i16
-    }
-
-    /// Encode a yaw angle (radians) to 1/10th degrees as i16
-    fn encode_yaw(angle_rad: f32) -> i16 {
-        (angle_rad.to_degrees() * 10.0) as i16
-    }
-
-    fn pack_spatial_element(element: &[f32]) -> Vec<u8> {
+    fn pack_spatial_element(element: &[f32]) -> Result<Vec<u8>> {
         let mut data = Vec::new();
         for &v in element {
-            data.extend_from_slice(&Self::encode_spatial(v).to_le_bytes());
+            data.extend_from_slice(&encode_spatial(v)?.to_le_bytes());
         }
-        data
+        Ok(data)
     }
 
-    fn pack_yaw_element(element: &[f32]) -> Vec<u8> {
+    fn pack_yaw_element(element: &[f32]) -> Result<Vec<u8>> {
         let mut data = Vec::new();
         for &v in element {
-            data.extend_from_slice(&Self::encode_yaw(v).to_le_bytes());
+            data.extend_from_slice(&encode_yaw(v)?.to_le_bytes());
         }
-        data
+        Ok(data)
     }
 
     /// Pack this segment into bytes for transmission
-    pub fn pack(&self) -> Vec<u8> {
-        let element_types = (Self::encode_type(&self.x) << 0)
+    ///
+    /// Returns an error if any coordinate is out of the representable range.
+    pub fn pack(&self) -> Result<Vec<u8>> {
+        let element_types = Self::encode_type(&self.x)
             | (Self::encode_type(&self.y) << 2)
             | (Self::encode_type(&self.z) << 4)
             | (Self::encode_type(&self.yaw) << 6);
@@ -263,35 +274,35 @@ impl CompressedSegment {
 
         data.push(element_types);
         data.extend_from_slice(&duration_ms.to_le_bytes());
-        data.extend(Self::pack_spatial_element(&self.x));
-        data.extend(Self::pack_spatial_element(&self.y));
-        data.extend(Self::pack_spatial_element(&self.z));
-        data.extend(Self::pack_yaw_element(&self.yaw));
+        data.extend(Self::pack_spatial_element(&self.x)?);
+        data.extend(Self::pack_spatial_element(&self.y)?);
+        data.extend(Self::pack_spatial_element(&self.z)?);
+        data.extend(Self::pack_yaw_element(&self.yaw)?);
 
-        data
+        Ok(data)
     }
 }
 
 /// A trajectory element that can be packed for transmission
 pub trait TrajectoryElement {
     /// Pack this element into bytes for transmission
-    fn pack(&self) -> Vec<u8>;
+    fn pack_to_bytes(&self) -> Result<Vec<u8>>;
 }
 
 impl TrajectoryElement for Poly4D {
-    fn pack(&self) -> Vec<u8> {
-        self.pack()
+    fn pack_to_bytes(&self) -> Result<Vec<u8>> {
+        Ok(self.pack())
     }
 }
 
 impl TrajectoryElement for CompressedStart {
-    fn pack(&self) -> Vec<u8> {
+    fn pack_to_bytes(&self) -> Result<Vec<u8>> {
         self.pack()
     }
 }
 
 impl TrajectoryElement for CompressedSegment {
-    fn pack(&self) -> Vec<u8> {
+    fn pack_to_bytes(&self) -> Result<Vec<u8>> {
         self.pack()
     }
 }
@@ -345,7 +356,7 @@ impl TrajectoryMemory {
     ) -> Result<usize> {
         let mut data = Vec::new();
         for element in trajectory {
-            data.extend(element.pack());
+            data.extend(element.pack_to_bytes()?);
         }
 
         self.memory.write::<fn(usize, usize)>(start_addr, &data, None).await?;
@@ -374,7 +385,7 @@ impl TrajectoryMemory {
     {
         let mut data = Vec::new();
         for element in trajectory {
-            data.extend(element.pack());
+            data.extend(element.pack_to_bytes()?);
         }
 
         self.memory.write(start_addr, &data, Some(progress_callback)).await?;
