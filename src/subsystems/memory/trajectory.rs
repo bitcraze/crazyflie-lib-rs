@@ -407,18 +407,4 @@ impl TrajectoryMemory {
         Ok(data.len())
     }
 
-    /// Write raw packed trajectory data to the Crazyflie
-    ///
-    /// This is useful when you have pre-packed trajectory data.
-    ///
-    /// # Arguments
-    /// * `data` - The raw trajectory data bytes
-    /// * `start_addr` - The address in trajectory memory to upload to (0 by default)
-    ///
-    /// # Returns
-    /// The number of bytes written
-    pub async fn write_raw(&self, data: &[u8], start_addr: usize) -> Result<usize> {
-        self.memory.write::<fn(usize, usize)>(start_addr, data, None).await?;
-        Ok(data.len())
-    }
 }
