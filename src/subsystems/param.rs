@@ -533,15 +533,12 @@ impl Param {
         let (param_id, _) = self.toc.get(name).ok_or_else(|| not_found(name))?;
 
         // Send request: [CMD(1), ID(2)]
-        let request = Packet::new(
-            PARAM_PORT,
-            MISC_CHANNEL,
-            vec![
-                MISC_GET_EXTENDED_TYPE_V2,
-                (param_id & 0xff) as u8,
-                (param_id >> 8) as u8,
-            ],
-        );
+        let request_data = vec![
+            MISC_GET_EXTENDED_TYPE_V2,
+            (param_id & 0xff) as u8,
+            (param_id >> 8) as u8,
+        ];
+        let request = Packet::new(PARAM_PORT, MISC_CHANNEL, request_data.clone());
 
         // Lock before sending to prevent race conditions with concurrent requests
         let misc_downlink = self.misc_downlink.lock().await;
@@ -555,9 +552,8 @@ impl Param {
         // V2 success: [CMD(1), ID(2), STATUS(1), EXTENDED_TYPE(1)]
         // Error: [CMD(1), ID(2), ERROR(1)]
         let response = misc_downlink
-            .recv_async()
-            .await
-            .map_err(|_| Error::Disconnected)?;
+            .wait_packet(PARAM_PORT, MISC_CHANNEL, &request_data)
+            .await?;
 
         let data = response.get_data();
 
@@ -634,15 +630,12 @@ impl Param {
         let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
 
         // Send request: [CMD(1), ID(2)]
-        let request = Packet::new(
-            PARAM_PORT,
-            MISC_CHANNEL,
-            vec![
-                MISC_GET_DEFAULT_VALUE_V2,
-                (param_id & 0xff) as u8,
-                (param_id >> 8) as u8,
-            ],
-        );
+        let request_data = vec![
+            MISC_GET_DEFAULT_VALUE_V2,
+            (param_id & 0xff) as u8,
+            (param_id >> 8) as u8,
+        ];
+        let request = Packet::new(PARAM_PORT, MISC_CHANNEL, request_data.clone());
 
         // Lock before sending to prevent race conditions with concurrent requests
         let misc_downlink = self.misc_downlink.lock().await;
@@ -656,9 +649,8 @@ impl Param {
         // V2 success: [CMD(1), ID(2), STATUS(1), VALUE(?)]
         // Error: [CMD(1), ID(2), ERROR(1)]
         let response = misc_downlink
-            .recv_async()
-            .await
-            .map_err(|_| Error::Disconnected)?;
+            .wait_packet(PARAM_PORT, MISC_CHANNEL, &request_data)
+            .await?;
 
         let data = response.get_data();
 
@@ -761,15 +753,12 @@ impl Param {
         }
 
         // Send request: [CMD(1), ID(2)]
-        let request = Packet::new(
-            PARAM_PORT,
-            MISC_CHANNEL,
-            vec![
-                MISC_PERSISTENT_GET_STATE,
-                (param_id & 0xff) as u8,
-                (param_id >> 8) as u8,
-            ],
-        );
+        let request_data = vec![
+            MISC_PERSISTENT_GET_STATE,
+            (param_id & 0xff) as u8,
+            (param_id >> 8) as u8,
+        ];
+        let request = Packet::new(PARAM_PORT, MISC_CHANNEL, request_data.clone());
 
         // Lock before sending to prevent race conditions with concurrent requests
         let misc_downlink = self.misc_downlink.lock().await;
@@ -781,9 +770,8 @@ impl Param {
 
         // Wait for response: [CMD(1), ID(2), STATUS(1), VALUE_DATA(?)]
         let response = misc_downlink
-            .recv_async()
-            .await
-            .map_err(|_| Error::Disconnected)?;
+            .wait_packet(PARAM_PORT, MISC_CHANNEL, &request_data)
+            .await?;
 
         let data = response.get_data();
 
@@ -886,15 +874,12 @@ impl Param {
         }
 
         // Send request: [CMD(1), ID(2)]
-        let request = Packet::new(
-            PARAM_PORT,
-            MISC_CHANNEL,
-            vec![
-                MISC_PERSISTENT_STORE,
-                (param_id & 0xff) as u8,
-                (param_id >> 8) as u8,
-            ],
-        );
+        let request_data = vec![
+            MISC_PERSISTENT_STORE,
+            (param_id & 0xff) as u8,
+            (param_id >> 8) as u8,
+        ];
+        let request = Packet::new(PARAM_PORT, MISC_CHANNEL, request_data.clone());
 
         // Lock before sending to prevent race conditions with concurrent requests
         let misc_downlink = self.misc_downlink.lock().await;
@@ -906,9 +891,8 @@ impl Param {
 
         // Wait for response: [CMD(1), ID(2), STATUS(1)]
         let response = misc_downlink
-            .recv_async()
-            .await
-            .map_err(|_| Error::Disconnected)?;
+            .wait_packet(PARAM_PORT, MISC_CHANNEL, &request_data)
+            .await?;
 
         let data = response.get_data();
 
@@ -963,15 +947,12 @@ impl Param {
         }
 
         // Send request: [CMD(1), ID(2)]
-        let request = Packet::new(
-            PARAM_PORT,
-            MISC_CHANNEL,
-            vec![
-                MISC_PERSISTENT_CLEAR,
-                (param_id & 0xff) as u8,
-                (param_id >> 8) as u8,
-            ],
-        );
+        let request_data = vec![
+            MISC_PERSISTENT_CLEAR,
+            (param_id & 0xff) as u8,
+            (param_id >> 8) as u8,
+        ];
+        let request = Packet::new(PARAM_PORT, MISC_CHANNEL, request_data.clone());
 
         // Lock before sending to prevent race conditions with concurrent requests
         let misc_downlink = self.misc_downlink.lock().await;
@@ -983,9 +964,8 @@ impl Param {
 
         // Wait for response: [CMD(1), ID(2), STATUS(1)]
         let response = misc_downlink
-            .recv_async()
-            .await
-            .map_err(|_| Error::Disconnected)?;
+            .wait_packet(PARAM_PORT, MISC_CHANNEL, &request_data)
+            .await?;
 
         let data = response.get_data();
 
