@@ -89,6 +89,22 @@ impl TryFrom<u8> for ParamItemInfo {
 type ParamChangeWatchers =
     Arc<Mutex<Vec<futures::channel::mpsc::UnboundedSender<(String, Value)>>>>;
 
+async fn notify_watchers(watchers: &ParamChangeWatchers, name: String, value: Value) {
+    let mut to_remove = Vec::new();
+    let mut watchers = watchers.lock().await;
+
+    for (i, watcher) in watchers.iter().enumerate() {
+        if watcher.unbounded_send((name.clone(), value)).is_err() {
+            to_remove.push(i);
+        }
+    }
+
+    // Remove watchers that have dropped
+    for i in to_remove.into_iter().rev() {
+        watchers.remove(i);
+    }
+}
+
 /// # Access to the Crazyflie Param Subsystem
 ///
 /// This struct provide methods to interact with the parameter subsystem. See the
@@ -206,20 +222,7 @@ impl Param {
                             // The param is tested as being in the toc so this unwrap cannot fail.
                             *values.lock().await.get_mut(param).unwrap() = Some(value);
 
-                            // Notify watchers
-                            let mut to_remove = Vec::new();
-                            let mut watchers_guard = watchers.lock().await;
-
-                            for (i, watcher) in watchers_guard.iter().enumerate() {
-                                if watcher.unbounded_send((param.clone(), value)).is_err() {
-                                    to_remove.push(i);
-                                }
-                            }
-
-                            // Remove watchers that have dropped
-                            for i in to_remove.into_iter().rev() {
-                                watchers_guard.remove(i);
-                            }
+                            notify_watchers(&watchers, param.clone(), value).await;
                         } else {
                             println!("Warning: Malformed param update");
                         }
@@ -330,7 +333,7 @@ impl Param {
         if echoed_bytes == expected_bytes.as_slice() {
             // The param is tested as being in the TOC so this unwrap cannot fail
             *self.values.lock().await.get_mut(param).unwrap() = Some(value);
-            self.notify_watchers(param, value).await;
+            notify_watchers(&self.watchers, param.to_owned(), value).await;
             Ok(())
         } else {
             // If echoed value doesn't match, it's likely a parameter error code
@@ -468,22 +471,6 @@ impl Param {
         watchers.push(tx);
 
         rx
-    }
-
-    async fn notify_watchers(&self, name: &str, value: Value) {
-        let mut to_remove = Vec::new();
-        let mut watchers = self.watchers.lock().await;
-
-        for (i, watcher) in watchers.iter().enumerate() {
-            if watcher.unbounded_send((name.to_owned(), value)).is_err() {
-                to_remove.push(i);
-            }
-        }
-
-        // Remove watchers that have dropped
-        for i in to_remove.into_iter().rev() {
-            watchers.remove(i);
-        }
     }
 
     /// Check if a parameter supports persistent storage
