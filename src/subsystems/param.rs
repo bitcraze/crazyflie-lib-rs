@@ -205,7 +205,7 @@ impl Param {
                         {
                             // The param is tested as being in the toc so this unwrap cannot fail.
                             *values.lock().await.get_mut(param).unwrap() = Some(value);
-                            
+
                             // Notify watchers
                             let mut to_remove = Vec::new();
                             let mut watchers_guard = watchers.lock().await;
@@ -378,7 +378,7 @@ impl Param {
         <T as TryFrom<Value>>::Error: std::fmt::Debug,
     {
         let mut values = self.values.lock().await;
-        
+
         let value = *values.get(name)
             .ok_or_else(|| not_found(name))?;
 
@@ -501,15 +501,15 @@ impl Param {
     pub async fn is_persistent(&self, name: &str) -> Result<bool> {
         // Check if parameter has extended type flag (bit 4)
         let (_, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
-        
+
         // If no extended type, it's not persistent
         if !param_info.has_extended_type {
             return Ok(false);
         }
-        
+
         // Query the actual extended type flags
         let extended_type = self.get_extended_type(name).await?;
-        
+
         // Check if PERSISTENT flag (bit 0) is set
         Ok((extended_type & 0x01) != 0)
     }
