@@ -55,9 +55,7 @@ impl MemoryBackend {
             let pk = Packet::new(MEMORY_PORT, READ_CHANNEL, request_data.clone());
             self.uplink
                 .send_async(pk)
-                .await
-                .map_err(|_| Error::Disconnected)
-                .ok();
+                .await?;
 
             let pk = self
                 .read_downlink
@@ -119,9 +117,7 @@ impl MemoryBackend {
 
             self.uplink
                 .send_async(pk)
-                .await
-                .map_err(|_| Error::Disconnected)
-                .ok();
+                .await?;
             current_address += to_write;
 
             if let Some(ref mut callback) = progress_callback {
