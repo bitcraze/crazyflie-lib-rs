@@ -20,6 +20,7 @@ const APP_CHANNEL: u8 = 2;
 const PLATFORM_SET_CONT_WAVE: u8 = 0;
 const PLATFORM_REQUEST_ARMING: u8 = 1;
 const PLATFORM_REQUEST_CRASH_RECOVERY: u8 = 2;
+const PLATFORMSET_CRAZYFLIE_NAME: u8 = 4;
 
 const VERSION_GET_PROTOCOL: u8 = 0;
 const VERSION_GET_FIRMWARE: u8 = 1;
@@ -32,19 +33,19 @@ pub const APPCHANNEL_MTU: usize = 31;
 ///
 /// See the [platform module documentation](crate::subsystems::platform) for more context and information.
 pub struct Platform {
+    commandcomm: Mutex<(Sender<Packet>, Receiver<Packet>)>,
     version_comm: Mutex<(Sender<Packet>, Receiver<Packet>)>,
     appchannel_comm: Mutex<Option<(Sender<Packet>, Receiver<Packet>)>>,
-    uplink: Sender<Packet>,
 }
 /// Access to the platform services
 impl Platform {
     pub(crate) fn new(uplink: Sender<Packet>, downlink: Receiver<Packet>) -> Self {
-        let (_, version_downlink, appchannel_downlink, _) = crtp_channel_dispatcher(downlink);
+        let (command_downlink, version_downlink, appchannel_downlink, _) = crtp_channel_dispatcher(downlink);
 
         Self {
+            commandcomm: Mutex::new((uplink.clone(), command_downlink)),
             version_comm: Mutex::new((uplink.clone(), version_downlink)),
             appchannel_comm: Mutex::new(Some((uplink.clone(), appchannel_downlink))),
-            uplink,
         }
     }
 
@@ -160,11 +161,32 @@ impl Platform {
     /// As such, this shall only be used for test purpose in a controlled environment.
     pub async fn set_cont_wave(&self, activate: bool) -> Result<()> {
         let command = if activate { 1 } else { 0 };
-        self.uplink
+        let (uplink, _) = &*self.commandcomm.lock().await;
+        uplink
             .send_async(Packet::new(
                 PLATFORM_PORT,
                 PLATFORM_COMMAND,
                 vec![PLATFORM_SET_CONT_WAVE, command],
+            ))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn set_name(&self, name: &str) -> Result<()> {
+        let (uplink, _) = &*self.commandcomm.lock().await;
+        let data = vec![PLATFORMSET_CRAZYFLIE_NAME, name.len() as u8]
+            .into_iter()
+            .chain(name.as_bytes().iter().cloned())
+            .chain(std::iter::once(0))
+            .collect();
+
+        dbg!(&data);
+
+        uplink
+            .send_async(Packet::new(
+                PLATFORM_PORT,
+                PLATFORM_COMMAND,
+                data,
             ))
             .await?;
         Ok(())
@@ -179,7 +201,8 @@ impl Platform {
     /// * `do_arm` - true to arm, false to disarm
     pub async fn send_arming_request(&self, do_arm: bool) -> Result<()> {
         let command = if do_arm { 1 } else { 0 };
-        self.uplink
+        let (uplink, _) = &*self.commandcomm.lock().await;
+        uplink
             .send_async(Packet::new(
                 PLATFORM_PORT,
                 PLATFORM_COMMAND,
@@ -193,7 +216,8 @@ impl Platform {
     ///
     /// Requests recovery from a crash state detected by the Crazyflie.
     pub async fn send_crash_recovery_request(&self) -> Result<()> {
-        self.uplink
+        let (uplink, _) = &*self.commandcomm.lock().await;
+        uplink
             .send_async(Packet::new(
                 PLATFORM_PORT,
                 PLATFORM_COMMAND,
