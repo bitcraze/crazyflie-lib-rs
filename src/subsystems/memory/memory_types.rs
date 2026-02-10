@@ -128,10 +128,24 @@ impl MemoryBackend {
                 callback(current_address - address, length);
             }
 
-            let _pk = self
+            let pk = self
                 .write_downlink
                 .wait_packet(MEMORY_PORT, WRITE_CHANNEL, &request_data[0..5])
                 .await;
+            if let Ok(pk) = pk {
+                let pk_data = pk.get_data();
+                if pk_data.len() >= 6 {
+                    let status = pk_data[5];
+                    if status != 0 {
+                        return Err(Error::MemoryError(format!(
+                            "Memory write returned error status ({}) @ {}",
+                            status, current_address - to_write
+                        )));
+                    }
+                }
+            } else {
+                return Err(Error::MemoryError("Failed to write memory".into()));
+            }
         }
         Ok(())
     }
