@@ -335,8 +335,8 @@ impl LighthouseMemory {
 
     /// Read all geometry data from the Crazyflie
     ///
-    /// Attempts to read geometry for all base stations (0-15). Base stations
-    /// that return invalid data are still included in the result with `valid = false`.
+    /// Attempts to read geometry for all base stations (0-15). Only base stations
+    /// with valid data are included in the result.
     ///
     /// # Returns
     /// A HashMap mapping base station ID to geometry data
@@ -361,9 +361,10 @@ impl LighthouseMemory {
                         result.insert(bs_id, geo);
                     }
                 }
-                Err(_) => {
+                Err(Error::MemoryError(_)) => {
                     // Base station not supported by firmware, skip it
                 }
+                Err(e) => return Err(e),
             }
             progress_callback(bs_id as usize + 1, Self::MAX_BASE_STATIONS);
         }
@@ -373,8 +374,8 @@ impl LighthouseMemory {
 
     /// Read all calibration data from the Crazyflie
     ///
-    /// Attempts to read calibration for all base stations (0-15). Base stations
-    /// that return invalid data are still included in the result with `valid = false`.
+    /// Attempts to read calibration for all base stations (0-15). Only base stations
+    /// with valid data are included in the result.
     ///
     /// # Returns
     /// A HashMap mapping base station ID to calibration data
@@ -399,9 +400,10 @@ impl LighthouseMemory {
                         result.insert(bs_id, calib);
                     }
                 }
-                Err(_) => {
+                Err(Error::MemoryError(_)) => {
                     // Base station not supported by firmware, skip it
                 }
+                Err(e) => return Err(e),
             }
             progress_callback(bs_id as usize + 1, Self::MAX_BASE_STATIONS);
         }
