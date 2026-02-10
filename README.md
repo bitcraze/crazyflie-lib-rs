@@ -21,9 +21,9 @@ The following subsystems are or need to be implemented:
    - [x] OneWire
    - [ ] DriverLed
    - [ ] Loco
-   - [ ] Trajectory
+   - [x] Trajectory
    - [ ] Loco2
-   - [ ] Lighthouse
+   - [x] Lighthouse
    - [ ] MemoryTester
    - [ ] DriverLedTiming
    - [ ] App
