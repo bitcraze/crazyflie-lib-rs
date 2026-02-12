@@ -1,0 +1,36 @@
+name: Publish to crates.io
+on:
+  workflow_dispatch: 
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write     # Required for OIDC token exchange
+    
+    steps:
+    - uses: actions/checkout@v6
+
+    # Verify tag and branch consistency before publishing
+    - id: check_version
+      name: Check version consistency between Git tag and Cargo.toml
+      run: |
+        TAG_VERSION=${GITHUB_REF#refs/tags/}
+        CARGO_VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')
+        if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+          echo "Tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+          exit 1
+        fi
+    - name: Verify branch
+      run: |
+        if [ "${GITHUB_REF#refs/heads/}" != "main" ]; then
+          echo "This workflow can only be run on the main branch."
+          exit 1
+        fi
+
+    # Publish to crates.io using OIDC for authentication
+    - uses: rust-lang/crates-io-auth-action@v1
+      id: auth
+    - run: cargo publish
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
