@@ -138,6 +138,11 @@ const _MISC_GET_DEFAULT_VALUE: u8 = 6; // V1 - deprecated, use V2
 const MISC_GET_EXTENDED_TYPE_V2: u8 = 7;
 const MISC_GET_DEFAULT_VALUE_V2: u8 = 8;
 
+// Firmware protocol status codes for persistent_get_state
+const PARAM_PERSISTENT_NOT_STORED: u8 = 0;
+const PARAM_PERSISTENT_STORED: u8 = 1;
+const PARAM_NOT_FOUND: u8 = 2;
+
 impl Param {
     pub(crate) async fn new<T>(
         downlink: channel::Receiver<Packet>,
@@ -555,8 +560,8 @@ impl Param {
         // Check if this is an error response (exactly 4 bytes)
         if data.len() == 4 {
             let error_code = data[3];
-            if error_code == 0x02 {
-                // ENOENT: parameter ID invalid OR parameter doesn't have PARAM_EXTENDED flag
+            if error_code == libc::ENOENT as u8 {
+                // Parameter ID invalid OR parameter doesn't have PARAM_EXTENDED flag
                 return Err(Error::ParamError(format!(
                     "Parameter '{}' does not have extended type info (not marked as PARAM_EXTENDED in firmware)",
                     name
@@ -652,8 +657,8 @@ impl Param {
         // Check if this is an error response (exactly 4 bytes)
         if data.len() == 4 {
             let error_code = data[3];
-            if error_code == 0x02 {
-                // ENOENT: parameter ID invalid OR parameter is read-only
+            if error_code == libc::ENOENT as u8 {
+                // Parameter ID invalid OR parameter is read-only
                 // (read-only params have no default value concept in firmware)
                 // Cache the unsupported state so we don't query again
                 let mut cache = self.default_values.lock().await;
@@ -774,15 +779,15 @@ impl Param {
         let status = data[3];
 
         // Validate status code:
-        // 0x00 = PARAM_PERSISTENT_NOT_STORED (no value in persistent storage)
-        // 0x01 = PARAM_PERSISTENT_STORED (value exists in persistent storage)
-        // 0x02 = ENOENT (parameter ID doesn't exist in firmware)
+        // PARAM_PERSISTENT_NOT_STORED = no value in persistent storage
+        // PARAM_PERSISTENT_STORED = value exists in persistent storage
+        // PARAM_NOT_FOUND = parameter ID doesn't exist in firmware
         let is_stored = match status {
-            0x00 => false,
-            0x01 => true,
-            0x02 => {
+            PARAM_PERSISTENT_NOT_STORED => false,
+            PARAM_PERSISTENT_STORED => true,
+            PARAM_NOT_FOUND => {
                 return Err(Error::ParamError(format!(
-                    "Parameter ID for '{}' is invalid or doesn't exist in firmware (ENOENT)",
+                    "Parameter ID for '{}' is invalid or doesn't exist in firmware",
                     name
                 )));
             }
@@ -895,8 +900,8 @@ impl Param {
 
         match status {
             0x00 => Ok(()),
-            0x02 => {
-                // ENOENT: storage operation failed (couldn't write to EEPROM)
+            x if x == libc::ENOENT as u8 => {
+                // Storage operation failed (couldn't write to EEPROM)
                 // or parameter ID invalid (shouldn't happen since we verified the ID)
                 Err(Error::ParamError(format!(
                     "Failed to store parameter '{}' to EEPROM (storage write failed)",
@@ -968,8 +973,8 @@ impl Param {
 
         match status {
             0x00 => Ok(()),
-            0x02 => {
-                // ENOENT: storage delete failed (couldn't delete from EEPROM)
+            x if x == libc::ENOENT as u8 => {
+                // Storage delete failed (couldn't delete from EEPROM)
                 // or parameter ID invalid (shouldn't happen since we verified the ID)
                 Err(Error::ParamError(format!(
                     "Failed to clear parameter '{}' from EEPROM (storage delete failed)",
