@@ -169,12 +169,15 @@ impl Param {
                         // The param is tested as being in the toc so this unwrap cannot fail.
                         *values.lock().await.get_mut(param).unwrap() = Some(value);
                     } else {
-                        println!("Warning: Malformed param update");
+                        println!("Error: Malformed param update");
+                        break;
                     }
                 } else {
-                    println!("Warning: malformed param update");
+                    println!("Error: malformed param update");
+                    break;
                 }
             }
+            values.lock().await.clear();
         });
     }
 

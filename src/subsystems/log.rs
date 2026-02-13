@@ -150,6 +150,7 @@ impl Log {
                     }
                 }
             }
+            data_channels.lock().await.clear();
         });
     }
 
