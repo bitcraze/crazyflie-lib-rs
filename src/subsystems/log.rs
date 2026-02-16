@@ -521,8 +521,8 @@ impl LogStream {
 
     fn decode_packet(&self, data: &[u8]) -> Result<LogData> {
         let mut timestamp = data[0..=2].to_vec();
-        timestamp.insert(0, 0);
-        // The timestamp is 2 bytes long by design so this unwrap cannot fail
+        timestamp.push(0);
+        // The timestamp is 3 bytes long, padded to 4 for u32 conversion
         let timestamp = u32::from_le_bytes(timestamp.try_into().unwrap());
 
         let mut index = 3;
