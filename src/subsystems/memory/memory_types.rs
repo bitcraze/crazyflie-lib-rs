@@ -126,14 +126,17 @@ impl MemoryBackend {
                 .wait_packet(MEMORY_PORT, WRITE_CHANNEL, &request_data[0..5])
                 .await?;
             let pk_data = pk.get_data();
-            if pk_data.len() >= 6 {
-                let status = pk_data[5];
-                if status != 0 {
-                    return Err(Error::MemoryError(format!(
-                        "Memory write returned error status ({}) @ {}",
-                        status, current_address - to_write
-                    )));
-                }
+            
+            if pk_data.len() < 6 {
+                return Err(Error::MemoryError("Malformed memory write response".into()));
+            }
+            
+            let status = pk_data[5];
+            if status != 0 {
+                return Err(Error::MemoryError(format!(
+                    "Memory write returned error status ({}) @ {}",
+                    status, current_address - to_write
+                )));
             }
         }
         Ok(())
