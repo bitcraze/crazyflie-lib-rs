@@ -69,12 +69,15 @@ impl MemoryDispatcher {
           if let Some(sender) = internal_senders.lock().await.get(&memory_id) {
             let _ = sender.send_async(pk).await;
           } else {
-            println!("Warning: Received memory read response for unknown memory ID {}", memory_id);
+            println!("Error: Received memory read response for unknown memory ID {}", memory_id);
+            break;
           }
         } else {
-          println!("Warning: Received packet on unexpected channel {}", pk.get_channel());
+          println!("Error: Received packet on unexpected channel {}", pk.get_channel());
+          break;
         }
       }
+      internal_senders.lock().await.clear();
     });
 
     Self {
