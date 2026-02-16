@@ -21,6 +21,7 @@ mod deckmem;
 mod raw;
 mod ow;
 mod trajectory;
+mod lighthouse;
 
 use crate::crazyflie::MEMORY_PORT;
 
@@ -30,6 +31,7 @@ pub use deckmem::*;
 pub use raw::*;
 pub use ow::*;
 pub use trajectory::*;
+pub use lighthouse::*;
 
 /// # Access to the Crazyflie Memory Subsystem
 ///
