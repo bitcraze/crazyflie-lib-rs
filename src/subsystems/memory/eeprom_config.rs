@@ -91,8 +91,7 @@ impl EEPROMConfigMemory {
             let radio_speed = RadioSpeed::try_from(data[6])?;
             let pitch_trim = f32::from_le_bytes(data[7..11].try_into().unwrap());
             let roll_trim = f32::from_le_bytes(data[11..15].try_into().unwrap());
-            let mut radio_address: [u8; 5] = data[15..20].try_into().unwrap();
-            radio_address[1..5].reverse();
+            let radio_address = [data[15], data[19], data[18], data[17], data[16]];
 
             let calculated_checksum = data[..data.len()-1].iter().fold(0u8, |acc, &byte| acc.wrapping_add(byte));
             let stored_checksum = data[data.len()-1];
@@ -143,9 +142,8 @@ impl EEPROMConfigMemory {
       data.push(self.radio_speed.clone() as u8);
       data.extend_from_slice(&self.pitch_trim.to_le_bytes());
       data.extend_from_slice(&self.roll_trim.to_le_bytes());
-      let mut radio_address = self.radio_address;
-      radio_address[1..5].reverse();
-      data.extend_from_slice(&radio_address);
+      let a = self.radio_address;
+      data.extend_from_slice(&[a[0], a[4], a[3], a[2], a[1]]);
 
       let checksum = data.iter().fold(0u8, |acc, &byte| acc.wrapping_add(byte));
       data.push(checksum);
