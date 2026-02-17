@@ -32,11 +32,11 @@ use crate::crazyflie::PARAM_PORT;
 /// State of a persistent parameter
 #[derive(Debug, Clone)]
 pub struct PersistentParamState {
-    /// True if a value is currently stored in EEPROM
+    /// True if a value is currently stored in persistent storage
     pub is_stored: bool,
     /// The firmware's default value for this parameter
     pub default_value: Value,
-    /// The value stored in EEPROM (if is_stored is true)
+    /// The value stored in persistent storage (if is_stored is true)
     pub stored_value: Option<Value>,
 }
 
@@ -45,7 +45,7 @@ pub struct PersistentParamState {
 enum DefaultValueCache {
     /// Parameter has this default value
     Value(Value),
-    /// Parameter doesn't support default value fetching (ENOENT)
+    /// Parameter doesn't support default value fetching
     Unsupported,
 }
 
@@ -480,16 +480,9 @@ impl Param {
 
     /// Check if a parameter supports persistent storage
     ///
-    /// Returns `true` if the parameter can be stored in EEPROM, `false` otherwise.
+    /// Returns `true` if the parameter can be stored in persistent storage, `false` otherwise.
     ///
-    /// This queries the firmware for the parameter's extended type flags to determine
-    /// if the PERSISTENT flag is set.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The parameter does not exist
-    /// - Communication with the Crazyflie fails
+    /// Returns an error if the parameter does not exist.
     pub async fn is_persistent(&self, name: &str) -> Result<bool> {
         // Check if parameter has extended type flag (bit 4)
         let (_, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
@@ -509,18 +502,12 @@ impl Param {
     /// Get the extended type flags of a parameter from the firmware
     ///
     /// Returns a bitfield of extended type flags. Currently defined flags:
-    /// - `0x01`: PERSISTENT - parameter can be stored in EEPROM
+    /// - `0x01`: PERSISTENT - parameter can be stored in persistent storage
     ///
     /// This queries the firmware directly. For most use cases, [`is_persistent()`](Self::is_persistent)
-    /// is more convenient as it provides a boolean result and first checks the TOC's
-    /// `has_extended_type` flag before querying the firmware.
+    /// is more convenient.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The parameter does not exist
-    /// - The parameter does not have extended type information
-    /// - Communication with the Crazyflie fails
+    /// Returns an error if the parameter does not exist or does not have extended type information.
     pub async fn get_extended_type(&self, name: &str) -> Result<u8> {
         let (param_id, _) = self.toc.get(name).ok_or_else(|| not_found(name))?;
 
@@ -596,14 +583,9 @@ impl Param {
     /// Get the default value of a parameter as defined in the firmware
     ///
     /// This retrieves the default value that the parameter has in the firmware,
-    /// regardless of whether a different value has been stored in EEPROM.
+    /// regardless of whether a different value has been stored in persistent storage.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The parameter does not exist
-    /// - The firmware does not support getting default values for this parameter
-    /// - Communication with the Crazyflie fails
+    /// Returns an error if the parameter does not exist or does not support getting default values.
     pub async fn get_default_value(&self, name: &str) -> Result<Value> {
         // Check cache first
         {
@@ -698,33 +680,19 @@ impl Param {
 
     /// Get the complete state of a persistent parameter
     ///
-    /// This retrieves comprehensive information about a persistent parameter:
-    /// - Whether a value is currently stored in EEPROM
+    /// Returns the following information about a persistent parameter:
+    /// - Whether a value is currently stored in persistent storage
     /// - The firmware's default value
     /// - The stored value (if one exists)
     ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The parameter does not exist
-    /// - The parameter is not persistent
-    /// - Communication with the Crazyflie fails
-    /// - The firmware does not support this operation for the parameter
+    /// Returns an error if the parameter does not exist or is not persistent.
     ///
     /// # Example
     ///
     /// ```no_run
-    /// # use crazyflie_lib::{Crazyflie, NoTocCache};
-    /// # use crazyflie_link::LinkContext;
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let context = LinkContext::new();
-    /// # let cf = Crazyflie::connect_from_uri(
-    /// #   &context,
-    /// #   "radio://0/60/2M/E7E7E7E7E7",
-    /// #   crazyflie_lib::NoTocCache
-    /// # ).await?;
+    /// # async fn example(cf: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
     /// let state = cf.param.persistent_get_state("ring.effect").await?;
-    /// 
+    ///
     /// println!("Default value: {:?}", state.default_value);
     /// if state.is_stored {
     ///     println!("Stored value: {:?}", state.stored_value.unwrap());
@@ -839,10 +807,12 @@ impl Param {
         }
     }
 
-    /// Store the current value of a persistent parameter to EEPROM.
+    /// Store the current value of a persistent parameter to persistent storage.
     ///
-    /// This writes the parameter's current value to non-volatile memory,
-    /// so it will be used as the default on subsequent boots.
+    /// When a value is stored, it will be used as the parameter's initial value
+    /// on every subsequent boot, instead of the firmware default. Note that
+    /// changing the parameter at runtime with [`set()`](Self::set) does not
+    /// update the stored value.
     ///
     /// # Example
     /// ```no_run
@@ -850,7 +820,7 @@ impl Param {
     /// // First set the value you want to persist
     /// cf.param.set("ring.effect", 10u8).await?;
     /// 
-    /// // Then store it to EEPROM
+    /// // Then store it to persistent storage
     /// cf.param.persistent_store("ring.effect").await?;
     /// # Ok(())
     /// # }
@@ -901,10 +871,10 @@ impl Param {
         match status {
             0x00 => Ok(()),
             x if x == libc::ENOENT as u8 => {
-                // Storage operation failed (couldn't write to EEPROM)
+                // Storage operation failed (couldn't write to persistent storage)
                 // or parameter ID invalid (shouldn't happen since we verified the ID)
                 Err(Error::ParamError(format!(
-                    "Failed to store parameter '{}' to EEPROM (storage write failed)",
+                    "Failed to store parameter '{}' to persistent storage (storage write failed)",
                     name
                 )))
             }
@@ -915,10 +885,10 @@ impl Param {
         }
     }
 
-    /// Clear the stored value of a persistent parameter from EEPROM.
+    /// Clear the stored value of a persistent parameter from persistent storage.
     ///
-    /// This removes the parameter's stored value from non-volatile memory,
-    /// causing it to revert to the firmware default on subsequent boots.
+    /// When cleared, the parameter will revert to the firmware default on every
+    /// subsequent boot.
     ///
     /// # Example
     /// ```no_run
@@ -974,10 +944,10 @@ impl Param {
         match status {
             0x00 => Ok(()),
             x if x == libc::ENOENT as u8 => {
-                // Storage delete failed (couldn't delete from EEPROM)
+                // Storage delete failed (couldn't delete from persistent storage)
                 // or parameter ID invalid (shouldn't happen since we verified the ID)
                 Err(Error::ParamError(format!(
-                    "Failed to clear parameter '{}' from EEPROM (storage delete failed)",
+                    "Failed to clear parameter '{}' from persistent storage (storage delete failed)",
                     name
                 )))
             }
