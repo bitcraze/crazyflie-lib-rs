@@ -11,20 +11,21 @@ jobs:
     steps:
     - uses: actions/checkout@v6
 
-    # Verify tag and branch consistency before publishing
+    # Verify we are on main and a matching git tag exists
+    - name: Verify branch is main
+      run: |
+        BRANCH=$(git rev-parse --abbrev-ref HEAD)
+        if [ "$BRANCH" != "main" ]; then
+          echo "This workflow can only be run on the main branch (currently on '$BRANCH')."
+          exit 1
+        fi
     - id: check_version
       name: Check version consistency between Git tag and Cargo.toml
       run: |
-        TAG_VERSION=${GITHUB_REF#refs/tags/}
+        TAG_VERSION=$(git describe --tags --exact-match HEAD)
         CARGO_VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')
         if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
           echo "Tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
-          exit 1
-        fi
-    - name: Verify branch
-      run: |
-        if [ "${GITHUB_REF#refs/heads/}" != "main" ]; then
-          echo "This workflow can only be run on the main branch."
           exit 1
         fi
 
