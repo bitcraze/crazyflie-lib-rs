@@ -20,6 +20,7 @@
 //! | Memory | None |
 //! | Param | Full(V2) |
 //! | Platform | Full |
+//! | Supervisor | Full (info and command channels) |
 //!
 //! ## Compatibility
 //!
