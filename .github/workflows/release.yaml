@@ -12,11 +12,11 @@ jobs:
     - uses: actions/checkout@v6
 
     # Verify we are on main and a matching git tag exists
-    - name: Verify branch is main
+    - name: Verify commit is on main
       run: |
-        BRANCH=$(git rev-parse --abbrev-ref HEAD)
-        if [ "$BRANCH" != "main" ]; then
-          echo "This workflow can only be run on the main branch (currently on '$BRANCH')."
+        git fetch origin main
+        if ! git merge-base --is-ancestor HEAD origin/main; then
+          echo "This workflow can only be run on a commit that is on the main branch."
           exit 1
         fi
     - id: check_version
