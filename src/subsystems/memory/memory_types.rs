@@ -55,36 +55,31 @@ impl MemoryBackend {
             let pk = Packet::new(MEMORY_PORT, READ_CHANNEL, request_data.clone());
             self.uplink
                 .send_async(pk)
-                .await
-                .map_err(|_| Error::Disconnected)
-                .ok();
+                .await?;
 
             let pk = self
                 .read_downlink
                 .wait_packet(MEMORY_PORT, READ_CHANNEL, &request_data[0..5])
-                .await;
-            if let Ok(pk) = pk {
-                let pk_data = pk.get_data();
+                .await?;
 
-                if pk_data.len() < 6 {
-                    return Err(Error::MemoryError("Malformed memory read response".into()));
-                }
+            let pk_data = pk.get_data();
 
-                let read_address = u32::from_le_bytes(pk_data[1..5].try_into().unwrap());
-                let status = pk_data[5];
+            if pk_data.len() < 6 {
+                return Err(Error::MemoryError("Malformed memory read response".into()));
+            }
 
-                if pk_data.len() >= 6 && read_address == current_address as u32 && status == 0 {
-                    let read_data = &pk_data[6..];
-                    let start = (current_address - address) as usize;
-                    let end = start + read_data.len();
-                    data[start..end].copy_from_slice(read_data);
-                } else if status != 0 {
-                    return Err(Error::MemoryError(format!("Memory read returned error status ({}) @ {}", status, current_address)));
-                } else {
-                    return Err(Error::MemoryError("Malformed memory read response".into()));
-                }
+            let read_address = u32::from_le_bytes(pk_data[1..5].try_into().unwrap());
+            let status = pk_data[5];
+
+            if pk_data.len() >= 6 && read_address == current_address as u32 && status == 0 {
+                let read_data = &pk_data[6..];
+                let start = (current_address - address) as usize;
+                let end = start + read_data.len();
+                data[start..end].copy_from_slice(read_data);
+            } else if status != 0 {
+                return Err(Error::MemoryError(format!("Memory read returned error status ({}) @ {}", status, current_address)));
             } else {
-                return Err(Error::MemoryError("Failed to read memory".into()));
+                return Err(Error::MemoryError("Malformed memory read response".into()));
             }
 
             current_address += to_read;
@@ -119,19 +114,30 @@ impl MemoryBackend {
 
             self.uplink
                 .send_async(pk)
-                .await
-                .map_err(|_| Error::Disconnected)
-                .ok();
+                .await?;
             current_address += to_write;
 
             if let Some(ref mut callback) = progress_callback {
                 callback(current_address - address, length);
             }
 
-            let _pk = self
+            let pk = self
                 .write_downlink
                 .wait_packet(MEMORY_PORT, WRITE_CHANNEL, &request_data[0..5])
-                .await;
+                .await?;
+            let pk_data = pk.get_data();
+            
+            if pk_data.len() < 6 {
+                return Err(Error::MemoryError("Malformed memory write response".into()));
+            }
+            
+            let status = pk_data[5];
+            if status != 0 {
+                return Err(Error::MemoryError(format!(
+                    "Memory write returned error status ({}) @ {}",
+                    status, current_address - to_write
+                )));
+            }
         }
         Ok(())
     }

@@ -229,16 +229,19 @@ impl Param {
 
                             notify_watchers(&watchers, param.clone(), value).await;
                         } else {
-                            println!("Warning: Malformed param update");
+                            println!("Error: Malformed param update");
+                            break;
                         }
                     } else {
-                        println!("Warning: malformed param update");
+                        println!("Error: malformed param update");
+                        break;
                     }
                 } else {
                     // Other MISC commands - forward to misc_cmd_tx
                     let _ = misc_cmd_tx.send_async(pk).await;
                 }
             }
+            values.lock().await.clear();
         });
     }
 
