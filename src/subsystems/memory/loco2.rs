@@ -102,8 +102,15 @@ impl LocoMemory2 {
     /// Read position data for a single anchor
     ///
     /// # Arguments
-    /// * `anchor_id` - The anchor ID (0-255, as stored in the ID list)
+    /// * `anchor_id` - The anchor ID (0-15, as stored in the ID list)
     pub async fn read_anchor_data(&self, anchor_id: u8) -> Result<LocoAnchorData> {
+        if anchor_id as usize >= MAX_NR_OF_ANCHORS {
+            return Err(Error::MemoryError(format!(
+                "Anchor ID {} out of range (0-{})",
+                anchor_id,
+                MAX_NR_OF_ANCHORS - 1
+            )));
+        }
         let addr = ADR_ANCHOR_BASE + ANCHOR_PAGE_SIZE * anchor_id as usize;
         let data = self.memory.read::<fn(usize, usize)>(addr, ANCHOR_DATA_LEN, None).await?;
         LocoAnchorData::from_bytes(&data)
