@@ -11,6 +11,7 @@
 pub mod commander;
 pub mod high_level_commander;
 pub mod console;
+pub mod link_service;
 pub mod localization;
 pub mod log;
 pub mod param;

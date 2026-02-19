@@ -15,6 +15,7 @@
 //! | Commander | Full |
 //! | Console | Full |
 //! | High-level Commander | Full |
+//! | Link Service | Full |
 //! | Localization | Full |
 //! | Log | Full (V2) |
 //! | Memory | None |

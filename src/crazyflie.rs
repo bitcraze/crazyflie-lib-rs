@@ -1,6 +1,7 @@
 use crate::subsystems::commander::Commander;
 use crate::subsystems::high_level_commander::HighLevelCommander;
 use crate::subsystems::console::Console;
+use crate::subsystems::link_service::LinkService;
 use crate::subsystems::localization::Localization;
 use crate::subsystems::log::Log;
 use crate::subsystems::memory::Memory;
@@ -28,7 +29,7 @@ pub(crate) const LOCALIZATION_PORT: u8 = 6;
 pub(crate) const GENERIC_SETPOINT_PORT: u8 = 7;
 pub(crate) const HL_COMMANDER_PORT: u8 = 8;
 pub(crate) const PLATFORM_PORT: u8 = 13;
-pub(crate) const _LINK_PORT: u8 = 15;
+pub(crate) const LINK_PORT: u8 = 15;
 
 /// # The Crazyflie
 ///
@@ -54,6 +55,8 @@ pub struct Crazyflie {
     pub localization: Localization,
     /// Platform services
     pub platform: Platform,
+    /// Link layer services (echo, latency, link quality)
+    pub link_service: LinkService,
     uplink_task: Mutex<Option<JoinHandle<()>>>,
     dispatch_task: Mutex<Option<JoinHandle<()>>>,
     disconnect: Arc<AtomicBool>,
@@ -131,6 +134,7 @@ impl Crazyflie {
         let console_downlink = dispatcher.get_port_receiver(CONSOLE_PORT).unwrap();
         let localization_downlink = dispatcher.get_port_receiver(LOCALIZATION_PORT).unwrap();
         let memory_downlink = dispatcher.get_port_receiver(MEMORY_PORT).unwrap();
+        let link_downlink = dispatcher.get_port_receiver(LINK_PORT).unwrap();
 
         // Start the downlink packet dispatcher
         let dispatch_task = dispatcher.run().await?;
@@ -161,6 +165,7 @@ impl Crazyflie {
         let high_level_commander = HighLevelCommander::new(uplink.clone());
         let console = Console::new(console_downlink).await?;
         let localization = Localization::new(uplink.clone(), localization_downlink);
+        let link_service = LinkService::new(uplink.clone(), link_downlink, link.clone());
         // Initialize async modules in parallel
         let (log, param, memory) = futures::join!(log_future, param_future, memory_future);
         Ok(Crazyflie {
@@ -172,6 +177,7 @@ impl Crazyflie {
             console,
             localization,
             platform,
+            link_service,
             uplink_task: Mutex::new(Some(uplink_task)),
             dispatch_task: Mutex::new(Some(dispatch_task)),
             disconnect,
