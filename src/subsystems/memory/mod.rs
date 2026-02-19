@@ -22,6 +22,7 @@ mod raw;
 mod ow;
 mod trajectory;
 mod lighthouse;
+mod loco2;
 
 use crate::crazyflie::MEMORY_PORT;
 
@@ -32,6 +33,7 @@ pub use raw::*;
 pub use ow::*;
 pub use trajectory::*;
 pub use lighthouse::*;
+pub use loco2::*;
 
 /// # Access to the Crazyflie Memory Subsystem
 ///
