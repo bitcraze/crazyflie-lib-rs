@@ -33,18 +33,16 @@ impl TocCache for InMemoryTocCache {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
+    let uri = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "radio://0/80/2M/E7E7E7E7E7".to_string());
     let toc_cache = InMemoryTocCache::new();
 
     let context = LinkContext::new();
     print!("1st connection ...");
     let start = std::time::Instant::now();
 
-    let cf = Crazyflie::connect_from_uri(
-      &context,
-      "radio://0/80/2M/E7E7E7E7E7",
-      toc_cache.clone()
-    )
-    .await?;
+    let cf = Crazyflie::connect_from_uri(&context, &uri, toc_cache.clone()).await?;
 
     println!(" {:?}", start.elapsed());
     drop(cf);
@@ -53,12 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("2nd connection ...");
     let start = std::time::Instant::now();
 
-    let cf = Crazyflie::connect_from_uri(
-        &context,
-        "radio://0/80/2M/E7E7E7E7E7",
-        toc_cache.clone()
-    )
-    .await?;
+    let cf = Crazyflie::connect_from_uri(&context, &uri, toc_cache.clone()).await?;
 
     println!(" {:?}", start.elapsed());
     drop(cf);
@@ -67,12 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("3rd connection ...");
     let start = std::time::Instant::now();
 
-    let _cf = Crazyflie::connect_from_uri(
-        &context,
-        "radio://0/80/2M/E7E7E7E7E7",
-        toc_cache.clone()
-    )
-    .await?;
+    let _cf = Crazyflie::connect_from_uri(&context, &uri, toc_cache.clone()).await?;
 
     println!(" {:?}", start.elapsed());
 
