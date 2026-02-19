@@ -7,7 +7,7 @@ use tokio::time::{sleep, Duration};
 
 #[derive(Clone)]
 struct InMemoryTocCache {
-  toc: Arc<RwLock<HashMap<u32, String>>>,
+  toc: Arc<RwLock<HashMap<Vec<u8>, String>>>,
 }
 
 impl InMemoryTocCache {
@@ -19,13 +19,13 @@ impl InMemoryTocCache {
 }
 
 impl TocCache for InMemoryTocCache {
-  fn get_toc(&self, crc32: u32) -> Option<String> {
-    self.toc.read().ok()?.get(&crc32).cloned()
+  fn get_toc(&self, key: &[u8]) -> Option<String> {
+    self.toc.read().ok()?.get(key).cloned()
   }
 
-  fn store_toc(&self, crc32: u32, toc: &str) {
+  fn store_toc(&self, key: &[u8], toc: &str) {
     if let Ok(mut lock) = self.toc.write() {
-      lock.insert(crc32, toc.to_string());
+      lock.insert(key.to_vec(), toc.to_string());
     }
   }
 }
