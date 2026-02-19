@@ -101,6 +101,9 @@ impl WaitForPacket for channel::Receiver<Packet> {
 const TOC_CHANNEL: u8 = 0;
 const TOC_GET_ITEM: u8 = 2;
 const TOC_INFO: u8 = 3;
+/// Cache format version, included in the cache key.
+/// Bump when ParamItemInfo or LogItemInfo serialization changes.
+const TOC_CACHE_VERSION: u8 = 1;
 
 pub(crate) async fn fetch_toc<C, T, E>(
     port: u8,
@@ -125,7 +128,8 @@ where
     let toc_crc32 = u32::from_le_bytes(pk.get_data()[3..7].try_into()?);
 
     let mut toc = std::collections::BTreeMap::new();
-    let cache_key = toc_crc32.to_le_bytes();
+    let crc_bytes = toc_crc32.to_le_bytes();
+    let cache_key: [u8; 5] = [TOC_CACHE_VERSION, crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]];
 
     // Check cache first
     if let Some(toc_str) = toc_cache.get_toc(&cache_key) {

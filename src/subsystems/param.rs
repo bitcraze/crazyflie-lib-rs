@@ -958,3 +958,18 @@ impl Param {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn param_toc_cache_format_stability() {
+        // This test pins the serialization format of ParamItemInfo.
+        // If it fails, the TOC cache format has changed. Bump TOC_CACHE_VERSION
+        // and update this test.
+        let info = ParamItemInfo { item_type: ValueType::U8, writable: true, has_extended_type: false };
+        let json = serde_json::to_string(&info).unwrap();
+        assert_eq!(json, r#"{"item_type":"U8","writable":true,"has_extended_type":false}"#);
+    }
+}
