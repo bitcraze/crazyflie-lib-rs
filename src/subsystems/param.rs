@@ -29,10 +29,31 @@ use std::{
 
 use crate::crazyflie::PARAM_PORT;
 
+/// State of a persistent parameter
+#[derive(Debug, Clone)]
+pub struct PersistentParamState {
+    /// True if a value is currently stored in persistent storage
+    pub is_stored: bool,
+    /// The firmware's default value for this parameter
+    pub default_value: Value,
+    /// The value stored in persistent storage (if is_stored is true)
+    pub stored_value: Option<Value>,
+}
+
+/// Cached state for a parameter's default value.
+#[derive(Debug, Clone, Copy)]
+enum DefaultValueCache {
+    /// Parameter has this default value
+    Value(Value),
+    /// Parameter doesn't support default value fetching
+    Unsupported,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ParamItemInfo {
     item_type: ValueType,
     writable: bool,
+    has_extended_type: bool, // Bit 4: indicates extended type info exists
 }
 
 impl TryFrom<u8> for ParamItemInfo {
@@ -60,12 +81,29 @@ impl TryFrom<u8> for ParamItemInfo {
                 }
             },
             writable: (value & (1 << 6)) == 0,
+            has_extended_type: (value & (1 << 4)) != 0,
         })
     }
 }
 
 type ParamChangeWatchers =
     Arc<Mutex<Vec<futures::channel::mpsc::UnboundedSender<(String, Value)>>>>;
+
+async fn notify_watchers(watchers: &ParamChangeWatchers, name: String, value: Value) {
+    let mut to_remove = Vec::new();
+    let mut watchers = watchers.lock().await;
+
+    for (i, watcher) in watchers.iter().enumerate() {
+        if watcher.unbounded_send((name.clone(), value)).is_err() {
+            to_remove.push(i);
+        }
+    }
+
+    // Remove watchers that have dropped
+    for i in to_remove.into_iter().rev() {
+        watchers.remove(i);
+    }
+}
 
 /// # Access to the Crazyflie Param Subsystem
 ///
@@ -76,8 +114,10 @@ pub struct Param {
     uplink: channel::Sender<Packet>,
     read_downlink: channel::Receiver<Packet>,
     write_downlink: Mutex<channel::Receiver<Packet>>,
+    misc_downlink: Mutex<channel::Receiver<Packet>>,
     toc: Arc<BTreeMap<String, (u16, ParamItemInfo)>>,
     values: Arc<Mutex<HashMap<String, Option<Value>>>>,
+    default_values: Arc<Mutex<HashMap<String, DefaultValueCache>>>,
     watchers: ParamChangeWatchers,
 }
 
@@ -87,7 +127,21 @@ fn not_found(name: &str) -> Error {
 
 const READ_CHANNEL: u8 = 1;
 const _WRITE_CHANNEL: u8 = 2;
-const _MISC_CHANNEL: u8 = 3;
+const MISC_CHANNEL: u8 = 3;
+
+// MISC channel and commands for persistent parameters
+const _MISC_GET_EXTENDED_TYPE: u8 = 2; // V1 - deprecated, use V2
+const MISC_PERSISTENT_STORE: u8 = 3;
+const MISC_PERSISTENT_GET_STATE: u8 = 4;
+const MISC_PERSISTENT_CLEAR: u8 = 5;
+const _MISC_GET_DEFAULT_VALUE: u8 = 6; // V1 - deprecated, use V2
+const MISC_GET_EXTENDED_TYPE_V2: u8 = 7;
+const MISC_GET_DEFAULT_VALUE_V2: u8 = 8;
+
+// Firmware protocol status codes for persistent_get_state
+const PARAM_PERSISTENT_NOT_STORED: u8 = 0;
+const PARAM_PERSISTENT_STORED: u8 = 1;
+const PARAM_NOT_FOUND: u8 = 2;
 
 impl Param {
     pub(crate) async fn new<T>(
@@ -103,18 +157,23 @@ impl Param {
 
         let toc = crate::crtp_utils::fetch_toc(PARAM_PORT, uplink.clone(), toc_downlink, toc_cache).await?;
 
+        // Create a channel for MISC commands (not param updates)
+        let (misc_cmd_tx, misc_cmd_rx) = channel::unbounded();
+
         let mut param = Self {
             uplink,
             read_downlink,
             write_downlink: Mutex::new(write_downlink),
+            misc_downlink: Mutex::new(misc_cmd_rx),
             toc: Arc::new(toc),
             values: Arc::new(Mutex::new(HashMap::new())),
+            default_values: Arc::new(Mutex::new(HashMap::new())),
             watchers: Arc::default(),
         };
 
         param.initialize_values().await?;
 
-        param.spawn_misc_loop(misc_downlink).await;
+        param.spawn_misc_loop(misc_downlink, misc_cmd_tx).await;
 
         Ok(param)
     }
@@ -150,31 +209,36 @@ impl Param {
         Value::from_le_bytes(&response.get_data()[3..], param_type)
     }
 
-    async fn spawn_misc_loop(&self, misc_downlink: channel::Receiver<Packet>) {
+    async fn spawn_misc_loop(&self, misc_downlink: channel::Receiver<Packet>, misc_cmd_tx: channel::Sender<Packet>) {
         let values = self.values.clone();
         let toc = self.toc.clone();
+        let watchers = self.watchers.clone();
 
         tokio::spawn(async move {
             while let Ok(pk) = misc_downlink.recv_async().await {
-                if pk.get_data()[0] != 1 {
-                    continue;
-                }
+                // Command byte 1 = parameter update notification
+                if pk.get_data().first() == Some(&1) {
+                    // The range sets the buffer to 2 bytes long so this unwrap cannot fail
+                    let param_id = u16::from_le_bytes(pk.get_data()[1..3].try_into().unwrap());
+                    if let Some((param, (_, item_info))) = toc.iter().find(|v| v.1 .0 == param_id) {
+                        if let Ok(value) =
+                            Value::from_le_bytes(&pk.get_data()[3..], item_info.item_type)
+                        {
+                            // The param is tested as being in the toc so this unwrap cannot fail.
+                            *values.lock().await.get_mut(param).unwrap() = Some(value);
 
-                // The range sets the buffer to 2 bytes long so this unwrap cannot fail
-                let param_id = u16::from_le_bytes(pk.get_data()[1..3].try_into().unwrap());
-                if let Some((param, (_, item_info))) = toc.iter().find(|v| v.1 .0 == param_id) {
-                    if let Ok(value) =
-                        Value::from_le_bytes(&pk.get_data()[3..], item_info.item_type)
-                    {
-                        // The param is tested as being in the toc so this unwrap cannot fail.
-                        *values.lock().await.get_mut(param).unwrap() = Some(value);
+                            notify_watchers(&watchers, param.clone(), value).await;
+                        } else {
+                            println!("Error: Malformed param update");
+                            break;
+                        }
                     } else {
-                        println!("Error: Malformed param update");
+                        println!("Error: malformed param update");
                         break;
                     }
                 } else {
-                    println!("Error: malformed param update");
-                    break;
+                    // Other MISC commands - forward to misc_cmd_tx
+                    let _ = misc_cmd_tx.send_async(pk).await;
                 }
             }
             values.lock().await.clear();
@@ -277,7 +341,7 @@ impl Param {
         if echoed_bytes == expected_bytes.as_slice() {
             // The param is tested as being in the TOC so this unwrap cannot fail
             *self.values.lock().await.get_mut(param).unwrap() = Some(value);
-            self.notify_watchers(param, value).await;
+            notify_watchers(&self.watchers, param.to_owned(), value).await;
             Ok(())
         } else {
             // If echoed value doesn't match, it's likely a parameter error code
@@ -325,7 +389,7 @@ impl Param {
         <T as TryFrom<Value>>::Error: std::fmt::Debug,
     {
         let mut values = self.values.lock().await;
-        
+
         let value = *values.get(name)
             .ok_or_else(|| not_found(name))?;
 
@@ -417,19 +481,498 @@ impl Param {
         rx
     }
 
-    async fn notify_watchers(&self, name: &str, value: Value) {
-        let mut to_remove = Vec::new();
-        let mut watchers = self.watchers.lock().await;
+    /// Check if a parameter supports persistent storage
+    ///
+    /// Returns `true` if the parameter can be stored in persistent storage, `false` otherwise.
+    ///
+    /// Returns an error if the parameter does not exist.
+    pub async fn is_persistent(&self, name: &str) -> Result<bool> {
+        // Check if parameter has extended type flag (bit 4)
+        let (_, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
 
-        for (i, watcher) in watchers.iter().enumerate() {
-            if watcher.unbounded_send((name.to_owned(), value)).is_err() {
-                to_remove.push(i);
+        // If no extended type, it's not persistent
+        if !param_info.has_extended_type {
+            return Ok(false);
+        }
+
+        // Query the actual extended type flags
+        let extended_type = self.get_extended_type(name).await?;
+
+        // Check if PERSISTENT flag (bit 0) is set
+        Ok((extended_type & 0x01) != 0)
+    }
+
+    /// Get the extended type flags of a parameter from the firmware
+    ///
+    /// Returns a bitfield of extended type flags. Currently defined flags:
+    /// - `0x01`: PERSISTENT - parameter can be stored in persistent storage
+    ///
+    /// This queries the firmware directly. For most use cases, [`is_persistent()`](Self::is_persistent)
+    /// is more convenient.
+    ///
+    /// Returns an error if the parameter does not exist or does not have extended type information.
+    pub async fn get_extended_type(&self, name: &str) -> Result<u8> {
+        let (param_id, _) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+
+        // Send request: [CMD(1), ID(2)]
+        let request_data = vec![
+            MISC_GET_EXTENDED_TYPE_V2,
+            (param_id & 0xff) as u8,
+            (param_id >> 8) as u8,
+        ];
+        let request = Packet::new(PARAM_PORT, MISC_CHANNEL, request_data.clone());
+
+        // Lock before sending to prevent race conditions with concurrent requests
+        let misc_downlink = self.misc_downlink.lock().await;
+
+        self.uplink
+            .send_async(request)
+            .await
+            .map_err(|_| Error::Disconnected)?;
+
+        // Wait for response
+        // V2 success: [CMD(1), ID(2), STATUS(1), EXTENDED_TYPE(1)]
+        // Error: [CMD(1), ID(2), ERROR(1)]
+        let response = misc_downlink
+            .wait_packet(PARAM_PORT, MISC_CHANNEL, &request_data)
+            .await?;
+
+        let data = response.get_data();
+
+        // Verify minimum response length
+        if data.len() < 4 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short: expected at least 4 bytes, got {}",
+                data.len()
+            )));
+        }
+
+        // Check if this is an error response (exactly 4 bytes)
+        if data.len() == 4 {
+            let error_code = data[3];
+            if error_code == libc::ENOENT as u8 {
+                // Parameter ID invalid OR parameter doesn't have PARAM_EXTENDED flag
+                return Err(Error::ParamError(format!(
+                    "Parameter '{}' does not have extended type info (not marked as PARAM_EXTENDED in firmware)",
+                    name
+                )));
+            } else {
+                return Err(Error::ParamError(format!(
+                    "Failed to get extended type for '{}': error code {}",
+                    name, error_code
+                )));
             }
         }
 
-        // Remove watchers that have dropped
-        for i in to_remove.into_iter().rev() {
-            watchers.remove(i);
+        // V2 success response: [CMD, ID_LOW, ID_HIGH, 0x00, EXTENDED_TYPE]
+        if data.len() < 5 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short for V2 success: expected 5 bytes, got {}",
+                data.len()
+            )));
         }
+
+        let status = data[3];
+        if status != 0x00 {
+            return Err(Error::ProtocolError(format!(
+                "Unexpected status byte in V2 response: expected 0x00, got 0x{:02x}",
+                status
+            )));
+        }
+
+        Ok(data[4])
+    }
+
+    /// Get the default value of a parameter as defined in the firmware
+    ///
+    /// This retrieves the default value that the parameter has in the firmware,
+    /// regardless of whether a different value has been stored in persistent storage.
+    ///
+    /// Returns an error if the parameter does not exist or does not support getting default values.
+    pub async fn get_default_value(&self, name: &str) -> Result<Value> {
+        // Check cache first
+        {
+            let cache = self.default_values.lock().await;
+            if let Some(cached) = cache.get(name) {
+                return match cached {
+                    DefaultValueCache::Value(v) => Ok(*v),
+                    DefaultValueCache::Unsupported => Err(Error::ParamError(format!(
+                        "Parameter '{}' does not support get_default_value (read-only or invalid)",
+                        name
+                    ))),
+                };
+            }
+        }
+
+        let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+
+        // Send request: [CMD(1), ID(2)]
+        let request_data = vec![
+            MISC_GET_DEFAULT_VALUE_V2,
+            (param_id & 0xff) as u8,
+            (param_id >> 8) as u8,
+        ];
+        let request = Packet::new(PARAM_PORT, MISC_CHANNEL, request_data.clone());
+
+        // Lock before sending to prevent race conditions with concurrent requests
+        let misc_downlink = self.misc_downlink.lock().await;
+
+        self.uplink
+            .send_async(request)
+            .await
+            .map_err(|_| Error::Disconnected)?;
+
+        // Wait for response
+        // V2 success: [CMD(1), ID(2), STATUS(1), VALUE(?)]
+        // Error: [CMD(1), ID(2), ERROR(1)]
+        let response = misc_downlink
+            .wait_packet(PARAM_PORT, MISC_CHANNEL, &request_data)
+            .await?;
+
+        let data = response.get_data();
+
+        // Verify minimum response length
+        if data.len() < 4 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short: expected at least 4 bytes, got {}",
+                data.len()
+            )));
+        }
+
+        // Check if this is an error response (exactly 4 bytes)
+        if data.len() == 4 {
+            let error_code = data[3];
+            if error_code == libc::ENOENT as u8 {
+                // Parameter ID invalid OR parameter is read-only
+                // (read-only params have no default value concept in firmware)
+                // Cache the unsupported state so we don't query again
+                let mut cache = self.default_values.lock().await;
+                cache.insert(name.to_owned(), DefaultValueCache::Unsupported);
+
+                return Err(Error::ParamError(format!(
+                    "Parameter '{}' does not support get_default_value (read-only or invalid)",
+                    name
+                )));
+            } else {
+                return Err(Error::ParamError(format!(
+                    "Failed to get default value for '{}': error code {}",
+                    name, error_code
+                )));
+            }
+        }
+
+        // V2 success response: [CMD, ID_LOW, ID_HIGH, 0x00, VALUE...]
+        let status = data[3];
+        if status != 0x00 {
+            return Err(Error::ProtocolError(format!(
+                "Unexpected status byte in V2 response: expected 0x00, got 0x{:02x}",
+                status
+            )));
+        }
+
+        // Parse value from data[4..] and cache it
+        let value = Value::from_le_bytes(&data[4..], param_info.item_type)?;
+
+        {
+            let mut cache = self.default_values.lock().await;
+            cache.insert(name.to_owned(), DefaultValueCache::Value(value));
+        }
+
+        Ok(value)
+    }
+
+    /// Get the complete state of a persistent parameter
+    ///
+    /// Returns the following information about a persistent parameter:
+    /// - Whether a value is currently stored in persistent storage
+    /// - The firmware's default value
+    /// - The stored value (if one exists)
+    ///
+    /// Returns an error if the parameter does not exist or is not persistent.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example(cf: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
+    /// let state = cf.param.persistent_get_state("ring.effect").await?;
+    ///
+    /// println!("Default value: {:?}", state.default_value);
+    /// if state.is_stored {
+    ///     println!("Stored value: {:?}", state.stored_value.unwrap());
+    /// } else {
+    ///     println!("Using default (not stored)");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn persistent_get_state(&self, name: &str) -> Result<PersistentParamState> {
+        let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+
+        if !self.is_persistent(name).await? {
+            return Err(Error::ParamError(format!(
+                "Parameter '{}' is not persistent",
+                name
+            )));
+        }
+
+        // Send request: [CMD(1), ID(2)]
+        let request_data = vec![
+            MISC_PERSISTENT_GET_STATE,
+            (param_id & 0xff) as u8,
+            (param_id >> 8) as u8,
+        ];
+        let request = Packet::new(PARAM_PORT, MISC_CHANNEL, request_data.clone());
+
+        // Lock before sending to prevent race conditions with concurrent requests
+        let misc_downlink = self.misc_downlink.lock().await;
+
+        self.uplink
+            .send_async(request)
+            .await
+            .map_err(|_| Error::Disconnected)?;
+
+        // Wait for response: [CMD(1), ID(2), STATUS(1), VALUE_DATA(?)]
+        let response = misc_downlink
+            .wait_packet(PARAM_PORT, MISC_CHANNEL, &request_data)
+            .await?;
+
+        let data = response.get_data();
+
+        // Response format: [CMD(1), ID(2), STATUS(1), VALUE_DATA(?)]
+        // Verify minimum response length
+        if data.len() < 4 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short: expected at least 4 bytes, got {}",
+                data.len()
+            )));
+        }
+
+        let status = data[3];
+
+        // Validate status code:
+        // PARAM_PERSISTENT_NOT_STORED = no value in persistent storage
+        // PARAM_PERSISTENT_STORED = value exists in persistent storage
+        // PARAM_NOT_FOUND = parameter ID doesn't exist in firmware
+        let is_stored = match status {
+            PARAM_PERSISTENT_NOT_STORED => false,
+            PARAM_PERSISTENT_STORED => true,
+            PARAM_NOT_FOUND => {
+                return Err(Error::ParamError(format!(
+                    "Parameter ID for '{}' is invalid or doesn't exist in firmware",
+                    name
+                )));
+            }
+            _ => {
+                return Err(Error::ProtocolError(format!(
+                    "Unexpected status code {} in persistent_get_state response for '{}'",
+                    status, name
+                )));
+            }
+        };
+        let value_size = param_info.item_type.byte_length();
+
+        // Parse values from data[4..]
+        if is_stored {
+            // Both default and stored values present
+            if data.len() < 4 + 2 * value_size {
+                return Err(Error::ProtocolError(format!(
+                    "Response too short for stored state: expected {} bytes, got {}",
+                    4 + 2 * value_size,
+                    data.len()
+                )));
+            }
+
+            let default_value = Value::from_le_bytes(&data[4..4 + value_size], param_info.item_type)?;
+            let stored_value = Value::from_le_bytes(&data[4 + value_size..4 + 2 * value_size], param_info.item_type)?;
+
+            Ok(PersistentParamState {
+                is_stored: true,
+                default_value,
+                stored_value: Some(stored_value),
+            })
+        } else {
+            // Only default value present
+            if data.len() < 4 + value_size {
+                return Err(Error::ProtocolError(format!(
+                    "Response too short for default value: expected {} bytes, got {}",
+                    4 + value_size,
+                    data.len()
+                )));
+            }
+
+            let default_value = Value::from_le_bytes(&data[4..4 + value_size], param_info.item_type)?;
+
+            Ok(PersistentParamState {
+                is_stored: false,
+                default_value,
+                stored_value: None,
+            })
+        }
+    }
+
+    /// Store the current value of a persistent parameter to persistent storage.
+    ///
+    /// When a value is stored, it will be used as the parameter's initial value
+    /// on every subsequent boot, instead of the firmware default. Note that
+    /// changing the parameter at runtime with [`set()`](Self::set) does not
+    /// update the stored value.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # async fn example(cf: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
+    /// // First set the value you want to persist
+    /// cf.param.set("ring.effect", 10u8).await?;
+    /// 
+    /// // Then store it to persistent storage
+    /// cf.param.persistent_store("ring.effect").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn persistent_store(&self, name: &str) -> Result<()> {
+        let (param_id, _) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+
+        if !self.is_persistent(name).await? {
+            return Err(Error::ParamError(format!(
+                "Parameter '{}' is not persistent",
+                name
+            )));
+        }
+
+        // Send request: [CMD(1), ID(2)]
+        let request_data = vec![
+            MISC_PERSISTENT_STORE,
+            (param_id & 0xff) as u8,
+            (param_id >> 8) as u8,
+        ];
+        let request = Packet::new(PARAM_PORT, MISC_CHANNEL, request_data.clone());
+
+        // Lock before sending to prevent race conditions with concurrent requests
+        let misc_downlink = self.misc_downlink.lock().await;
+
+        self.uplink
+            .send_async(request)
+            .await
+            .map_err(|_| Error::Disconnected)?;
+
+        // Wait for response: [CMD(1), ID(2), STATUS(1)]
+        let response = misc_downlink
+            .wait_packet(PARAM_PORT, MISC_CHANNEL, &request_data)
+            .await?;
+
+        let data = response.get_data();
+
+        // Verify response length
+        if data.len() < 4 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short: expected 4 bytes, got {}",
+                data.len()
+            )));
+        }
+
+        let status = data[3];
+
+        match status {
+            0x00 => Ok(()),
+            x if x == libc::ENOENT as u8 => {
+                // Storage operation failed (couldn't write to persistent storage)
+                // or parameter ID invalid (shouldn't happen since we verified the ID)
+                Err(Error::ParamError(format!(
+                    "Failed to store parameter '{}' to persistent storage (storage write failed)",
+                    name
+                )))
+            }
+            _ => Err(Error::ProtocolError(format!(
+                "Unexpected status code {} in persistent_store response for '{}'",
+                status, name
+            ))),
+        }
+    }
+
+    /// Clear the stored value of a persistent parameter from persistent storage.
+    ///
+    /// When cleared, the parameter will revert to the firmware default on every
+    /// subsequent boot.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # async fn example(cf: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
+    /// // Clear the stored value, reverting to default
+    /// cf.param.persistent_clear("ring.effect").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn persistent_clear(&self, name: &str) -> Result<()> {
+        let (param_id, _) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+
+        if !self.is_persistent(name).await? {
+            return Err(Error::ParamError(format!(
+                "Parameter '{}' is not persistent",
+                name
+            )));
+        }
+
+        // Send request: [CMD(1), ID(2)]
+        let request_data = vec![
+            MISC_PERSISTENT_CLEAR,
+            (param_id & 0xff) as u8,
+            (param_id >> 8) as u8,
+        ];
+        let request = Packet::new(PARAM_PORT, MISC_CHANNEL, request_data.clone());
+
+        // Lock before sending to prevent race conditions with concurrent requests
+        let misc_downlink = self.misc_downlink.lock().await;
+
+        self.uplink
+            .send_async(request)
+            .await
+            .map_err(|_| Error::Disconnected)?;
+
+        // Wait for response: [CMD(1), ID(2), STATUS(1)]
+        let response = misc_downlink
+            .wait_packet(PARAM_PORT, MISC_CHANNEL, &request_data)
+            .await?;
+
+        let data = response.get_data();
+
+        // Verify response length
+        if data.len() < 4 {
+            return Err(Error::ProtocolError(format!(
+                "Response too short: expected 4 bytes, got {}",
+                data.len()
+            )));
+        }
+
+        let status = data[3];
+
+        match status {
+            0x00 => Ok(()),
+            x if x == libc::ENOENT as u8 => {
+                // Storage delete failed (couldn't delete from persistent storage)
+                // or parameter ID invalid (shouldn't happen since we verified the ID)
+                Err(Error::ParamError(format!(
+                    "Failed to clear parameter '{}' from persistent storage (storage delete failed)",
+                    name
+                )))
+            }
+            _ => Err(Error::ProtocolError(format!(
+                "Unexpected status code {} in persistent_clear response for '{}'",
+                status, name
+            ))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn param_toc_cache_format_stability() {
+        // This test pins the serialization format of ParamItemInfo.
+        // If it fails, the TOC cache format has changed. Bump TOC_CACHE_VERSION
+        // and update this test.
+        let info = ParamItemInfo { item_type: ValueType::U8, writable: true, has_extended_type: false };
+        let json = serde_json::to_string(&info).unwrap();
+        assert_eq!(json, r#"{"item_type":"U8","writable":true,"has_extended_type":false}"#);
     }
 }
