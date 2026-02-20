@@ -7,7 +7,7 @@ use tokio::time::{sleep, Duration};
 
 #[derive(Clone)]
 struct InMemoryTocCache {
-  toc: Arc<RwLock<HashMap<u32, String>>>,
+  toc: Arc<RwLock<HashMap<Vec<u8>, String>>>,
 }
 
 impl InMemoryTocCache {
@@ -19,13 +19,13 @@ impl InMemoryTocCache {
 }
 
 impl TocCache for InMemoryTocCache {
-  fn get_toc(&self, crc32: u32) -> Option<String> {
-    self.toc.read().ok()?.get(&crc32).cloned()
+  fn get_toc(&self, key: &[u8]) -> Option<String> {
+    self.toc.read().ok()?.get(key).cloned()
   }
 
-  fn store_toc(&self, crc32: u32, toc: &str) {
+  fn store_toc(&self, key: &[u8], toc: &str) {
     if let Ok(mut lock) = self.toc.write() {
-      lock.insert(crc32, toc.to_string());
+      lock.insert(key.to_vec(), toc.to_string());
     }
   }
 }
@@ -33,18 +33,16 @@ impl TocCache for InMemoryTocCache {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
+    let uri = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "radio://0/80/2M/E7E7E7E7E7".to_string());
     let toc_cache = InMemoryTocCache::new();
 
     let context = LinkContext::new();
     print!("1st connection ...");
     let start = std::time::Instant::now();
 
-    let cf = Crazyflie::connect_from_uri(
-      &context,
-      "radio://0/80/2M/E7E7E7E7E7",
-      toc_cache.clone()
-    )
-    .await?;
+    let cf = Crazyflie::connect_from_uri(&context, &uri, toc_cache.clone()).await?;
 
     println!(" {:?}", start.elapsed());
     drop(cf);
@@ -53,12 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("2nd connection ...");
     let start = std::time::Instant::now();
 
-    let cf = Crazyflie::connect_from_uri(
-        &context,
-        "radio://0/80/2M/E7E7E7E7E7",
-        toc_cache.clone()
-    )
-    .await?;
+    let cf = Crazyflie::connect_from_uri(&context, &uri, toc_cache.clone()).await?;
 
     println!(" {:?}", start.elapsed());
     drop(cf);
@@ -67,12 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("3rd connection ...");
     let start = std::time::Instant::now();
 
-    let _cf = Crazyflie::connect_from_uri(
-        &context,
-        "radio://0/80/2M/E7E7E7E7E7",
-        toc_cache.clone()
-    )
-    .await?;
+    let _cf = Crazyflie::connect_from_uri(&context, &uri, toc_cache.clone()).await?;
 
     println!(" {:?}", start.elapsed());
 

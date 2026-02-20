@@ -101,6 +101,9 @@ impl WaitForPacket for channel::Receiver<Packet> {
 const TOC_CHANNEL: u8 = 0;
 const TOC_GET_ITEM: u8 = 2;
 const TOC_INFO: u8 = 3;
+/// Cache format version, included in the cache key.
+/// Bump when ParamItemInfo or LogItemInfo serialization changes.
+const TOC_CACHE_VERSION: u8 = 1;
 
 pub(crate) async fn fetch_toc<C, T, E>(
     port: u8,
@@ -125,9 +128,11 @@ where
     let toc_crc32 = u32::from_le_bytes(pk.get_data()[3..7].try_into()?);
 
     let mut toc = std::collections::BTreeMap::new();
+    let crc_bytes = toc_crc32.to_le_bytes();
+    let cache_key: [u8; 5] = [TOC_CACHE_VERSION, crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]];
 
     // Check cache first
-    if let Some(toc_str) = toc_cache.get_toc(toc_crc32) {
+    if let Some(toc_str) = toc_cache.get_toc(&cache_key) {
         toc = serde_json::from_str(&toc_str).map_err(|e| Error::InvalidParameter(format!("Failed to deserialize TOC cache: {}", e)))?;
         return Ok(toc);
     }
@@ -157,7 +162,7 @@ where
 
     // Store in cache
     let toc_str = serde_json::to_string(&toc).map_err(|e| Error::InvalidParameter(format!("Failed to serialize TOC: {}", e)))?;
-    toc_cache.store_toc(toc_crc32, &toc_str);
+    toc_cache.store_toc(&cache_key, &toc_str);
 
     Ok(toc)
 }
@@ -200,11 +205,11 @@ pub fn crtp_channel_dispatcher(
 pub struct NoTocCache;
 
 impl TocCache for NoTocCache {
-    fn get_toc(&self, _crc32: u32) -> Option<String> {
+    fn get_toc(&self, _key: &[u8]) -> Option<String> {
         None
     }
 
-    fn store_toc(&self, _crc32: u32, _toc: &str) {
+    fn store_toc(&self, _key: &[u8], _toc: &str) {
         // No-op: this cache doesn't store anything
     }
 }
@@ -212,8 +217,12 @@ impl TocCache for NoTocCache {
 /// A trait for caching Table of Contents (TOC) data.
 ///
 /// This trait provides methods for storing and retrieving TOC information
-/// using a CRC32 checksum as the key. Implementations can use this to avoid
-/// re-fetching TOC data when the checksum matches a cached version.
+/// using an opaque byte key. Implementations can use this to avoid
+/// re-fetching TOC data when the key matches a cached version.
+///
+/// The key is constructed by the library and should be treated as an opaque
+/// identifier. Implementors are free to encode it in whatever way suits their
+/// storage backend (e.g., hex encoding for filenames, raw bytes for in-memory maps).
 ///
 /// # Concurrency
 ///
@@ -230,39 +239,39 @@ impl TocCache for NoTocCache {
 ///
 /// #[derive(Clone)]
 /// struct InMemoryCache {
-///     data: Arc<RwLock<HashMap<u32, String>>>,
+///     data: Arc<RwLock<HashMap<Vec<u8>, String>>>,
 /// }
 ///
 /// impl TocCache for InMemoryCache {
-///     fn get_toc(&self, crc32: u32) -> Option<String> {
-///         self.data.read().ok()?.get(&crc32).cloned()
+///     fn get_toc(&self, key: &[u8]) -> Option<String> {
+///         self.data.read().ok()?.get(key).cloned()
 ///     }
 ///
-///     fn store_toc(&self, crc32: u32, toc: &str) {
+///     fn store_toc(&self, key: &[u8], toc: &str) {
 ///         if let Ok(mut lock) = self.data.write() {
-///             lock.insert(crc32, toc.to_string());
+///             lock.insert(key.to_vec(), toc.to_string());
 ///         }
 ///     }
 /// }
 /// ```
 pub trait TocCache: Clone + Send + Sync + 'static
 {
-    /// Retrieves a cached TOC string based on the provided CRC32 checksum.
+    /// Retrieves a cached TOC string based on the provided key.
     ///
     /// # Arguments
     ///
-    /// * `crc32` - The CRC32 checksum used to identify the TOC.
+    /// * `key` - An opaque byte key used to identify the TOC.
     ///
     /// # Returns
     ///
     /// An `Option<String>` containing the cached TOC if it exists, or `None` if not found.
-    fn get_toc(&self, crc32: u32) -> Option<String>;
+    fn get_toc(&self, key: &[u8]) -> Option<String>;
 
-    /// Stores a TOC string associated with the provided CRC32 checksum.
+    /// Stores a TOC string associated with the provided key.
     ///
     /// # Arguments
     ///
-    /// * `crc32` - The CRC32 checksum used to identify the TOC.
+    /// * `key` - An opaque byte key used to identify the TOC.
     /// * `toc` - The TOC string to be stored.
-    fn store_toc(&self, crc32: u32, toc: &str);
+    fn store_toc(&self, key: &[u8], toc: &str);
 }

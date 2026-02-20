@@ -593,3 +593,18 @@ impl TryFrom<Duration> for LogPeriod {
         Ok(LogPeriod(period_arg as u8))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_toc_cache_format_stability() {
+        // This test pins the serialization format of LogItemInfo.
+        // If it fails, the TOC cache format has changed. Bump TOC_CACHE_VERSION
+        // and update this test.
+        let info = LogItemInfo { item_type: ValueType::U8 };
+        let json = serde_json::to_string(&info).unwrap();
+        assert_eq!(json, r#"{"item_type":"U8"}"#);
+    }
+}
