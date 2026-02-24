@@ -36,8 +36,9 @@ pub struct Statistics {
     pub avg_retries: Option<f32>,
     /// Fraction of ACKs where the nRF24 power detector triggered (0.0 to 1.0). `None` for USB connections.
     pub power_detector_rate: Option<f32>,
-    /// Average uplink RSSI as reported by the Crazyflie firmware. `None` if unavailable.
-    pub uplink_rssi: Option<f32>,
+    /// Average RSSI in dBm measured by the radio dongle on received ACK packets.
+    /// `None` if the radio doesn't support RSSI.
+    pub rssi: Option<f32>,
 }
 
 /// Result of a bandwidth test
@@ -230,7 +231,7 @@ impl LinkService {
             radio_send_rate: radio_stats.as_ref().map(|s| s.radio_send_rate),
             avg_retries: radio_stats.as_ref().map(|s| s.avg_retries),
             power_detector_rate: radio_stats.as_ref().map(|s| s.power_detector_rate),
-            uplink_rssi: radio_stats.and_then(|s| s.uplink_rssi),
+            rssi: radio_stats.and_then(|s| s.rssi),
         }
     }
 }

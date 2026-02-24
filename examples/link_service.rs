@@ -64,9 +64,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None => println!("  Power detector:  N/A"),
         }
 
-        match stats.uplink_rssi {
-            Some(rssi) => println!("  Uplink RSSI:     {:.0} dBm", rssi),
-            None => println!("  Uplink RSSI:     N/A"),
+        match stats.rssi {
+            Some(rssi) => println!("  RSSI:            {:.0} dBm", rssi),
+            None => println!("  RSSI:            N/A"),
         }
 
         println!();
