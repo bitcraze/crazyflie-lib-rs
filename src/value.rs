@@ -7,7 +7,7 @@ use std::convert::{TryFrom, TryInto};
 /// This enum supports all the data types that can be exchanged with the Crazyflie
 /// using the [log](crate::subsystems::log) and [param](crate::subsystems::param) subsystems.
 ///
-/// A function allows to convert a `[u8]` to a [Value] and the [Into<Vec<U8>>]
+/// A function allows to convert a `[u8]` to a [Value] and the [`Into<Vec<u8>>`]
 /// trait is implemented to convert a [Value] into a vector of bytes.
 ///
 /// The [TryFrom] trait is implemented for all matching rust primitive type. There
@@ -26,27 +26,27 @@ use std::convert::{TryFrom, TryInto};
 /// ```
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Value {
-    /// [u8] value
+    /// [prim@u8] value
     U8(u8),
-    /// [u16] value
+    /// [prim@u16] value
     U16(u16),
-    /// [u32] value
+    /// [prim@u32] value
     U32(u32),
-    /// [u64] value
+    /// [prim@u64] value
     U64(u64),
-    /// [i8] value
+    /// [prim@i8] value
     I8(i8),
-    /// [i16] value
+    /// [prim@i16] value
     I16(i16),
-    /// [i32] value
+    /// [prim@i32] value
     I32(i32),
-    /// [i64] value
+    /// [prim@i64] value
     I64(i64),
-    /// [f16] value
+    /// [prim@f16] value
     F16(f16),
-    /// [f32] value
+    /// [prim@f32] value
     F32(f32),
-    /// [f64] value
+    /// [prim@f64] value
     F64(f64),
 }
 
@@ -55,27 +55,27 @@ pub enum Value {
 /// This enum contains all the possible type of a [Value]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ValueType {
-    /// Type of a [u8] value
+    /// Type of a [prim@u8] value
     U8,
-    /// Type of a [u16] value
+    /// Type of a [prim@u16] value
     U16,
-    /// Type of a [u32] value
+    /// Type of a [prim@u32] value
     U32,
-    /// Type of a [u64] value
+    /// Type of a [prim@u64] value
     U64,
-    /// Type of a [i8] value
+    /// Type of a [prim@i8] value
     I8,
-    /// Type of a [i16] value
+    /// Type of a [prim@i16] value
     I16,
-    /// Type of a [i32] value
+    /// Type of a [prim@i32] value
     I32,
-    /// Type of a [i64] value
+    /// Type of a [prim@i64] value
     I64,
-    /// Type of a [f16] value
+    /// Type of a [prim@f16] value
     F16,
-    /// Type of a [f32] value
+    /// Type of a [prim@f32] value
     F32,
-    /// Type of a [f64] value
+    /// Type of a [prim@f64] value
     F64,
 }
 

@@ -122,7 +122,7 @@ impl Platform {
     /// This function returns the transmit and receive channel to and from
     /// the app channel. The channel accepts and generates [AppChannelPacket]
     /// which guarantees that the packet length is correct. the From trait is
-    /// implemented to all possible ```[u8; n]``` and TryFrom to Vec<u8> for
+    /// implemented to all possible ```[u8; n]``` and TryFrom to `Vec<u8>` for
     /// [AppChannelPacket].
     pub async fn get_app_channel(
         &self,
@@ -206,7 +206,7 @@ impl Platform {
 
 /// # App channel packet
 ///
-/// This object wraps a Vec<u8> but can only be created for byte array of length
+/// This object wraps a `Vec<u8>` but can only be created for byte array of length
 /// <= [APPCHANNEL_MTU].
 ///
 /// The [TryFrom] trait is implemented for ```Vec<u8>``` and ```&[u8]```. The

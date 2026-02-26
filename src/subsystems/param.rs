@@ -281,7 +281,7 @@ impl Param {
     /// Crazyflie. If the set is successful `Ok(())` is returned, otherwise the
     /// error code reported by the Crazyflie is returned in the error.
     ///
-    /// This function accepts any primitive type as well as the [Value](crate::Value) type. The
+    /// This function accepts any primitive type as well as the [Value] type. The
     /// type of the param variable is checked at runtime and must match the type
     /// given to the function, either the direct primitive type or the type
     /// contained in the `Value` enum. For example, to write a u16 value, both lines are valid:
