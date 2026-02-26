@@ -1,6 +1,6 @@
 [package]
 name = "crazyflie-lib"
-version = "0.5.2"
+version = "0.6.0"
 authors = [
   "Arnaud Taffanel <arnaud@bitcraze.io>",
   "Rik Bouwmeester <rik@bitcraze.io>",
