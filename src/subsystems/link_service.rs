@@ -11,6 +11,7 @@ use crate::crazyflie::LINK_PORT;
 use crate::{Error, Result};
 use crazyflie_link::Packet;
 use flume as channel;
+use futures::lock::Mutex;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -61,8 +62,8 @@ pub struct BandwidthResult {
 /// more context and information.
 pub struct LinkService {
     uplink: channel::Sender<Packet>,
-    echo_downlink: channel::Receiver<Packet>,
-    source_downlink: channel::Receiver<Packet>,
+    echo_downlink: Mutex<channel::Receiver<Packet>>,
+    source_downlink: Mutex<channel::Receiver<Packet>>,
     link: Arc<crazyflie_link::Connection>,
 }
 
@@ -77,8 +78,8 @@ impl LinkService {
 
         Self {
             uplink,
-            echo_downlink,
-            source_downlink,
+            echo_downlink: Mutex::new(echo_downlink),
+            source_downlink: Mutex::new(source_downlink),
             link,
         }
     }
@@ -91,6 +92,7 @@ impl LinkService {
     /// Note that no other packets should be sent on the echo channel while a ping is in flight,
     /// as this may interfere with the measurement or cause the function to return a protocol error.
     pub async fn ping(&self) -> Result<f64> {
+        let echo_downlink = self.echo_downlink.lock().await;
         const PING_PAYLOAD: [u8; 1] = [0x01];
         let start = Instant::now();
 
@@ -102,7 +104,7 @@ impl LinkService {
 
         let answer = tokio::time::timeout(
             Duration::from_secs(1),
-            self.echo_downlink.recv_async(),
+            echo_downlink.recv_async(),
         )
         .await
         .map_err(|_| Error::Timeout)?
@@ -124,6 +126,7 @@ impl LinkService {
     ///
     /// Returns the measured uplink throughput in bytes per second.
     pub async fn test_uplink_bandwidth(&self, duration: Duration) -> Result<f64> {
+        let echo_downlink = self.echo_downlink.lock().await;
         let data = vec![0xAA; MAX_DATA_SIZE];
         let start = Instant::now();
         let mut total_bytes: u64 = 0;
@@ -146,7 +149,7 @@ impl LinkService {
 
             tokio::time::timeout(
                 Duration::from_secs(1),
-                self.echo_downlink.recv_async(),
+                echo_downlink.recv_async(),
             )
             .await
             .map_err(|_| Error::Timeout)?
@@ -166,6 +169,7 @@ impl LinkService {
     ///
     /// Returns the measured downlink throughput in bytes per second.
     pub async fn test_downlink_bandwidth(&self, duration: Duration) -> Result<f64> {
+        let source_downlink = self.source_downlink.lock().await;
         let start = Instant::now();
         let mut total_bytes: u64 = 0;
 
@@ -178,7 +182,7 @@ impl LinkService {
 
             let response = tokio::time::timeout(
                 Duration::from_secs(1),
-                self.source_downlink.recv_async(),
+                source_downlink.recv_async(),
             )
             .await
             .map_err(|_| Error::Timeout)?
@@ -197,6 +201,7 @@ impl LinkService {
     /// This measures the achievable throughput when both uplink and downlink
     /// carry full payloads.
     pub async fn test_echo_bandwidth(&self, duration: Duration) -> Result<BandwidthResult> {
+        let echo_downlink = self.echo_downlink.lock().await;
         let data = vec![0xAA; MAX_DATA_SIZE];
         let start = Instant::now();
         let mut packets: u64 = 0;
@@ -210,7 +215,7 @@ impl LinkService {
 
             tokio::time::timeout(
                 Duration::from_secs(1),
-                self.echo_downlink.recv_async(),
+                echo_downlink.recv_async(),
             )
             .await
             .map_err(|_| Error::Timeout)?
