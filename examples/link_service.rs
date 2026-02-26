@@ -11,12 +11,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let uri = "radio://0/80/2M/E7E7E7E7E7";
     println!("Connecting to {} ...", uri);
 
-    let cf = crazyflie_lib::Crazyflie::connect_from_uri(
-        &link_context,
-        &uri,
-        crazyflie_lib::NoTocCache,
-    )
-    .await?;
+    let cf =
+        crazyflie_lib::Crazyflie::connect_from_uri(&link_context, &uri, crazyflie_lib::NoTocCache)
+            .await?;
 
     println!("Connected!\n");
 
@@ -74,25 +71,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Bandwidth tests
-    println!("--- Bandwidth tests (5 seconds each) ---\n");
+    const N_PACKETS: u64 = 2000;
+    println!("--- Bandwidth tests ({} packets each) ---\n", N_PACKETS);
 
     println!("Testing uplink (sink)...");
-    match cf.link_service.test_uplink_bandwidth(Duration::from_secs(5)).await {
+    match cf.link_service.test_uplink_bandwidth(N_PACKETS).await {
         Ok(bps) => println!("  Uplink:   {:.1} kB/s", bps / 1024.0),
         Err(e) => println!("  Uplink:   failed ({})", e),
     }
 
     println!("Testing downlink (source)...");
-    match cf.link_service.test_downlink_bandwidth(Duration::from_secs(5)).await {
+    match cf.link_service.test_downlink_bandwidth(N_PACKETS).await {
         Ok(bps) => println!("  Downlink: {:.1} kB/s", bps / 1024.0),
         Err(e) => println!("  Downlink: failed ({})", e),
     }
 
-    println!("Testing echo (round-trip)...");
-    match cf.link_service.test_echo_bandwidth(Duration::from_secs(5)).await {
+    println!("Testing both direction bandwidth (round-trip)...");
+    match cf.link_service.test_echo_bandwidth(N_PACKETS).await {
         Ok(result) => {
-            println!("  Uplink:   {:.1} kB/s", result.uplink_bytes_per_sec / 1024.0);
-            println!("  Downlink: {:.1} kB/s", result.downlink_bytes_per_sec / 1024.0);
+            println!(
+                "  Uplink:   {:.1} kB/s",
+                result.uplink_bytes_per_sec / 1024.0
+            );
+            println!(
+                "  Downlink: {:.1} kB/s",
+                result.downlink_bytes_per_sec / 1024.0
+            );
             println!("  Packets:  {:.0} pkt/s", result.packets_per_sec);
         }
         Err(e) => println!("  Echo:     failed ({})", e),

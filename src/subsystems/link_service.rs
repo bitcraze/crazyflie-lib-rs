@@ -91,7 +91,7 @@ impl LinkService {
     ///
     /// Sends an echo packet on the link service port and waits for the
     /// Crazyflie to echo it back. Returns the measured round-trip time.
-    /// 
+    ///
     /// Note that no other packets should be sent on the echo channel while a ping is in flight,
     /// as this may interfere with the measurement or cause the function to return a protocol error.
     pub async fn ping(&self) -> Result<f64> {
@@ -105,13 +105,10 @@ impl LinkService {
             .await
             .map_err(|_| Error::Disconnected)?;
 
-        let answer = tokio::time::timeout(
-            Duration::from_secs(1),
-            echo_downlink.recv_async(),
-        )
-        .await
-        .map_err(|_| Error::Timeout)?
-        .map_err(|_| Error::Disconnected)?;
+        let answer = tokio::time::timeout(Duration::from_secs(1), echo_downlink.recv_async())
+            .await
+            .map_err(|_| Error::Timeout)?
+            .map_err(|_| Error::Disconnected)?;
 
         if answer.get_data() != &PING_PAYLOAD {
             return Err(Error::ProtocolError("Ping got wrong echo back".to_string()));
@@ -122,47 +119,45 @@ impl LinkService {
 
     /// Test uplink bandwidth using the sink channel
     ///
-    /// Sends max-size packets to the sink channel (which drops them) as fast
-    /// as possible for the given duration. Uses the echo channel to pace sends
-    /// to the actual radio throughput: after filling the uplink queue, an echo
-    /// request is sent and we wait for the response before counting the batch.
+    /// Sends `n_packets` max-size packets to the sink channel (which drops them)
+    /// as fast as possible. Uses the echo channel to measure the time taken to send all
+    /// packets and receive the final echo response,
     ///
     /// Returns the measured uplink throughput in bytes per second.
-    pub async fn test_uplink_bandwidth(&self, duration: Duration) -> Result<f64> {
-        let echo_downlink = self.echo_downlink.lock().await;
+    pub async fn test_uplink_bandwidth(&self, n_packets: u64) -> Result<f64> {
         let data = vec![FILL_PATTERN; MAX_DATA_SIZE];
         let start = Instant::now();
         let mut total_bytes: u64 = 0;
 
-        while start.elapsed() < duration {
+        for _ in 0..n_packets {
             // Send a sink packet (Crazyflie drops it, but the radio ACKs it)
             let pk = Packet::new(LINK_PORT, SINK_CHANNEL, data.clone());
             self.uplink
                 .send_async(pk)
                 .await
                 .map_err(|_| Error::Disconnected)?;
+            total_bytes += MAX_DATA_SIZE as u64;
+        }
 
-            // Send an echo to pace ourselves — wait for the round trip
-            const ECHO_PAYLOAD: [u8; 1] = [0x00];
-            let echo = Packet::new(LINK_PORT, ECHO_CHANNEL, ECHO_PAYLOAD.to_vec());
-            self.uplink
-                .send_async(echo)
-                .await
-                .map_err(|_| Error::Disconnected)?;
+        // Send an echo to detect the end of the test — wait for the round trip,
+        // will only happen when all previous packets have been sent and ACKed by the radio
+        const ECHO_PAYLOAD: [u8; 1] = [0x00];
+        let echo = Packet::new(LINK_PORT, ECHO_CHANNEL, ECHO_PAYLOAD.to_vec());
+        self.uplink
+            .send_async(echo)
+            .await
+            .map_err(|_| Error::Disconnected)?;
 
-            let answer = tokio::time::timeout(
-                Duration::from_secs(1),
-                echo_downlink.recv_async(),
-            )
+        let echo_downlink = self.echo_downlink.lock().await;
+        let answer = tokio::time::timeout(Duration::from_secs(10), echo_downlink.recv_async())
             .await
             .map_err(|_| Error::Timeout)?
             .map_err(|_| Error::Disconnected)?;
 
-            if answer.get_data() != &ECHO_PAYLOAD {
-                return Err(Error::ProtocolError("Echo got wrong payload back".to_string()));
-            }
-
-            total_bytes += MAX_DATA_SIZE as u64;
+        if answer.get_data() != &ECHO_PAYLOAD {
+            return Err(Error::ProtocolError(
+                "Echo got wrong payload back".to_string(),
+            ));
         }
 
         let elapsed = start.elapsed().as_secs_f64();
@@ -171,29 +166,29 @@ impl LinkService {
 
     /// Test downlink bandwidth using the source channel
     ///
-    /// Sends requests to the source channel as fast as possible for the given
-    /// duration. The Crazyflie responds to each request with a 32-byte packet.
+    /// Sends `n_packets` requests to the source channel as fast as possible.
+    /// The Crazyflie responds to each request with a 32-byte packet.
     ///
     /// Returns the measured downlink throughput in bytes per second.
-    pub async fn test_downlink_bandwidth(&self, duration: Duration) -> Result<f64> {
+    pub async fn test_downlink_bandwidth(&self, n_packets: u64) -> Result<f64> {
         let source_downlink = self.source_downlink.lock().await;
         let start = Instant::now();
         let mut total_bytes: u64 = 0;
 
-        while start.elapsed() < duration {
+        for _ in 0..n_packets {
             let pk = Packet::new(LINK_PORT, SOURCE_CHANNEL, vec![0x00]);
             self.uplink
                 .send_async(pk)
                 .await
                 .map_err(|_| Error::Disconnected)?;
+        }
 
-            let response = tokio::time::timeout(
-                Duration::from_secs(1),
-                source_downlink.recv_async(),
-            )
-            .await
-            .map_err(|_| Error::Timeout)?
-            .map_err(|_| Error::Disconnected)?;
+        for _ in 0..n_packets {
+            let response =
+                tokio::time::timeout(Duration::from_secs(1), source_downlink.recv_async())
+                    .await
+                    .map_err(|_| Error::Timeout)?
+                    .map_err(|_| Error::Disconnected)?;
 
             total_bytes += response.get_data().len() as u64;
         }
@@ -204,32 +199,33 @@ impl LinkService {
 
     /// Test round-trip bandwidth using the echo channel
     ///
-    /// Sends max-size packets to the echo channel and waits for each response.
+    /// Sends `n_packets` max-size packets to the echo channel and waits for each response.
     /// This measures the achievable throughput when both uplink and downlink
     /// carry full payloads.
-    pub async fn test_echo_bandwidth(&self, duration: Duration) -> Result<BandwidthResult> {
+    pub async fn test_echo_bandwidth(&self, n_packets: u64) -> Result<BandwidthResult> {
         let echo_downlink = self.echo_downlink.lock().await;
         let data = vec![FILL_PATTERN; MAX_DATA_SIZE];
         let start = Instant::now();
         let mut packets: u64 = 0;
 
-        while start.elapsed() < duration {
+        for _ in 0..n_packets {
             let pk = Packet::new(LINK_PORT, ECHO_CHANNEL, data.clone());
             self.uplink
                 .send_async(pk)
                 .await
                 .map_err(|_| Error::Disconnected)?;
+        }
 
-            let answer = tokio::time::timeout(
-                Duration::from_secs(1),
-                echo_downlink.recv_async(),
-            )
-            .await
-            .map_err(|_| Error::Timeout)?
-            .map_err(|_| Error::Disconnected)?;
+        for _ in 0..n_packets {
+            let answer = tokio::time::timeout(Duration::from_secs(1), echo_downlink.recv_async())
+                .await
+                .map_err(|_| Error::Timeout)?
+                .map_err(|_| Error::Disconnected)?;
 
             if answer.get_data() != data.as_slice() {
-                return Err(Error::ProtocolError("Echo got wrong payload back".to_string()));
+                return Err(Error::ProtocolError(
+                    "Echo got wrong payload back".to_string(),
+                ));
             }
 
             packets += 1;
