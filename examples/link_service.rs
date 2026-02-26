@@ -8,7 +8,7 @@ use tokio::time::Duration;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let link_context = crazyflie_link::LinkContext::new();
 
-    let uri = std::env::var("CFURI").unwrap_or_else(|_| "radio://0/20/2M/D91F700101".to_string());
+    let uri = "radio://0/80/2M/E7E7E7E7E7";
     println!("Connecting to {} ...", uri);
 
     let cf = crazyflie_lib::Crazyflie::connect_from_uri(

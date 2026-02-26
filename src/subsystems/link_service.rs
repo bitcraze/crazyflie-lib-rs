@@ -87,22 +87,30 @@ impl LinkService {
     ///
     /// Sends an echo packet on the link service port and waits for the
     /// Crazyflie to echo it back. Returns the measured round-trip time.
+    /// 
+    /// Note that no other packets should be sent on the echo channel while a ping is in flight,
+    /// as this may interfere with the measurement or cause the function to return a protocol error.
     pub async fn ping(&self) -> Result<f64> {
+        const PING_PAYLOAD: [u8; 1] = [0x01];
         let start = Instant::now();
 
-        let pk = Packet::new(LINK_PORT, ECHO_CHANNEL, vec![0x01]);
+        let pk = Packet::new(LINK_PORT, ECHO_CHANNEL, PING_PAYLOAD.to_vec());
         self.uplink
             .send_async(pk)
             .await
             .map_err(|_| Error::Disconnected)?;
 
-        tokio::time::timeout(
+        let answer = tokio::time::timeout(
             Duration::from_secs(1),
             self.echo_downlink.recv_async(),
         )
         .await
         .map_err(|_| Error::Timeout)?
         .map_err(|_| Error::Disconnected)?;
+
+        if answer.get_data() != &PING_PAYLOAD {
+            return Err(Error::ProtocolError("Ping got wrong echo back".to_string()));
+        }
 
         Ok(start.elapsed().as_secs_f64() * 1000.0)
     }
@@ -129,7 +137,8 @@ impl LinkService {
                 .map_err(|_| Error::Disconnected)?;
 
             // Send an echo to pace ourselves — wait for the round trip
-            let echo = Packet::new(LINK_PORT, ECHO_CHANNEL, vec![0x00]);
+            const ECHO_PAYLOAD: [u8; 1] = [0x00];
+            let echo = Packet::new(LINK_PORT, ECHO_CHANNEL, ECHO_PAYLOAD.to_vec());
             self.uplink
                 .send_async(echo)
                 .await
