@@ -22,6 +22,9 @@ const SINK_CHANNEL: u8 = 2;
 /// Max CRTP data payload
 const MAX_DATA_SIZE: usize = 30;
 
+/// Fill byte used for bandwidth test payloads
+const FILL_PATTERN: u8 = 0xAA;
+
 /// A snapshot of radio link statistics
 #[derive(Debug, Clone)]
 pub struct Statistics {
@@ -127,7 +130,7 @@ impl LinkService {
     /// Returns the measured uplink throughput in bytes per second.
     pub async fn test_uplink_bandwidth(&self, duration: Duration) -> Result<f64> {
         let echo_downlink = self.echo_downlink.lock().await;
-        let data = vec![0xAA; MAX_DATA_SIZE];
+        let data = vec![FILL_PATTERN; MAX_DATA_SIZE];
         let start = Instant::now();
         let mut total_bytes: u64 = 0;
 
@@ -206,7 +209,7 @@ impl LinkService {
     /// carry full payloads.
     pub async fn test_echo_bandwidth(&self, duration: Duration) -> Result<BandwidthResult> {
         let echo_downlink = self.echo_downlink.lock().await;
-        let data = vec![0xAA; MAX_DATA_SIZE];
+        let data = vec![FILL_PATTERN; MAX_DATA_SIZE];
         let start = Instant::now();
         let mut packets: u64 = 0;
 
