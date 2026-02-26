@@ -147,13 +147,17 @@ impl LinkService {
                 .await
                 .map_err(|_| Error::Disconnected)?;
 
-            tokio::time::timeout(
+            let answer = tokio::time::timeout(
                 Duration::from_secs(1),
                 echo_downlink.recv_async(),
             )
             .await
             .map_err(|_| Error::Timeout)?
             .map_err(|_| Error::Disconnected)?;
+
+            if answer.get_data() != &ECHO_PAYLOAD {
+                return Err(Error::ProtocolError("Echo got wrong payload back".to_string()));
+            }
 
             total_bytes += MAX_DATA_SIZE as u64;
         }
@@ -213,13 +217,17 @@ impl LinkService {
                 .await
                 .map_err(|_| Error::Disconnected)?;
 
-            tokio::time::timeout(
+            let answer = tokio::time::timeout(
                 Duration::from_secs(1),
                 echo_downlink.recv_async(),
             )
             .await
             .map_err(|_| Error::Timeout)?
             .map_err(|_| Error::Disconnected)?;
+
+            if answer.get_data() != data.as_slice() {
+                return Err(Error::ProtocolError("Echo got wrong payload back".to_string()));
+            }
 
             packets += 1;
         }
