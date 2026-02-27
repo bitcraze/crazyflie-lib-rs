@@ -103,9 +103,9 @@ pub struct LighthouseAngleData {
 /// Lighthouse sweep angles for all 4 sensors
 #[derive(Debug, Clone)]
 pub struct LighthouseAngles {
-    /// Horizontal angles for 4 sensors [rad]
+    /// Horizontal angles for 4 sensors (rad)
     pub x: [f32; 4],
-    /// Vertical angles for 4 sensors [rad]
+    /// Vertical angles for 4 sensors (rad)
     pub y: [f32; 4],
 }
 

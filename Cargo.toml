@@ -18,7 +18,7 @@ exclude = [
 ]
 
 [dependencies]
-crazyflie-link = "0.4.1"
+crazyflie-link = "0.4.2"
 futures-util = "0.3.31"
 futures = "0.3.31"
 async-stream = "0.3.6"

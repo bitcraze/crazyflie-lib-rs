@@ -560,7 +560,7 @@ pub struct LogData {
 
 /// # Log block period
 ///
-/// This object represent a valid log period. It implements the [TryFrom<Duration>]
+/// This object represent a valid log period. It implements the [`TryFrom<Duration>`]
 /// trait so it can be constructed from a [Duration] object. a [LogPeriod::from_millis()]
 /// function is provided for convenience.
 ///
