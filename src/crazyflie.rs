@@ -211,12 +211,15 @@ impl Crazyflie {
         let localization = Localization::new(uplink.clone(), localization_downlink);
         // Initialize async modules in parallel
         let (log, param, memory) = futures::join!(log_future, param_future, memory_future);
+        let log = log?;
+        let param = param?;
+        let memory = memory?;
 
         let (uplink_task, dispatch_task) = guard.disarm();
         Ok(Crazyflie {
-            log: log?,
-            param: param?,
-            memory: memory?,
+            log,
+            param,
+            memory,
             commander,
             high_level_commander,
             console,
