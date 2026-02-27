@@ -143,12 +143,11 @@ impl LinkService {
         // will only happen when all previous packets have been sent and ACKed by the radio
         const ECHO_PAYLOAD: [u8; 1] = [0x00];
         let echo = Packet::new(LINK_PORT, ECHO_CHANNEL, ECHO_PAYLOAD.to_vec());
+        let echo_downlink = self.echo_downlink.lock().await;
         self.uplink
             .send_async(echo)
             .await
             .map_err(|_| Error::Disconnected)?;
-
-        let echo_downlink = self.echo_downlink.lock().await;
         let answer = tokio::time::timeout(Duration::from_secs(10), echo_downlink.recv_async())
             .await
             .map_err(|_| Error::Timeout)?
