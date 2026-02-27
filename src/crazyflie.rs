@@ -18,6 +18,51 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// RAII guard that aborts background tasks and signals disconnect if `connect_from_link` fails.
+/// Call `disarm()` on success to transfer ownership of the task handles.
+struct ConnectGuard {
+    disconnect: Arc<AtomicBool>,
+    uplink_task: Option<JoinHandle<()>>,
+    dispatch_task: Option<JoinHandle<()>>,
+}
+
+impl ConnectGuard {
+    fn new(
+        disconnect: Arc<AtomicBool>,
+        uplink_task: JoinHandle<()>,
+        dispatch_task: JoinHandle<()>,
+    ) -> Self {
+        Self {
+            disconnect,
+            uplink_task: Some(uplink_task),
+            dispatch_task: Some(dispatch_task),
+        }
+    }
+
+    /// Transfer ownership of the task handles without triggering cleanup.
+    fn disarm(mut self) -> (JoinHandle<()>, JoinHandle<()>) {
+        let ut = self.uplink_task.take().unwrap();
+        let dt = self.dispatch_task.take().unwrap();
+        (ut, dt)
+        // Drop of self sees None for both tasks → cleanup is skipped
+    }
+}
+
+impl Drop for ConnectGuard {
+    fn drop(&mut self) {
+        // If either handle is still present, connect_from_link failed → clean up
+        if self.uplink_task.is_some() || self.dispatch_task.is_some() {
+            self.disconnect.store(true, Relaxed);
+            if let Some(h) = self.uplink_task.take() {
+                h.abort();
+            }
+            if let Some(h) = self.dispatch_task.take() {
+                h.abort();
+            }
+        }
+    }
+}
+
 // CRTP ports
 pub(crate) const CONSOLE_PORT: u8 = 0;
 pub(crate) const PARAM_PORT: u8 = 2;
@@ -135,6 +180,9 @@ impl Crazyflie {
         // Start the downlink packet dispatcher
         let dispatch_task = dispatcher.run().await?;
 
+        // Guard ensures background tasks are aborted if connect_from_link fails at any point.
+        let guard = ConnectGuard::new(disconnect.clone(), uplink_task, dispatch_task);
+
         // Start with the platform subsystem to get and test the Crazyflie's protocol version
         let platform = Platform::new(uplink.clone(), platform_downlink);
 
@@ -163,10 +211,15 @@ impl Crazyflie {
         let localization = Localization::new(uplink.clone(), localization_downlink);
         // Initialize async modules in parallel
         let (log, param, memory) = futures::join!(log_future, param_future, memory_future);
+        let log = log?;
+        let param = param?;
+        let memory = memory?;
+
+        let (uplink_task, dispatch_task) = guard.disarm();
         Ok(Crazyflie {
-            log: log?,
-            param: param?,
-            memory: memory?,
+            log,
+            param,
+            memory,
             commander,
             high_level_commander,
             console,
