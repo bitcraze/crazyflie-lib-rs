@@ -45,7 +45,7 @@ impl Led {
     }
 
     fn to_rgb565(&self) -> u16 {
-        let intensity = self.intensity as u32;
+        let intensity = self.intensity.min(100) as u32;
         let r5 = ((((self.r as u32) * 249 + 1014) >> 11) & 0x1F) * intensity / 100;
         let g6 = ((((self.g as u32) * 253 + 505) >> 10) & 0x3F) * intensity / 100;
         let b5 = ((((self.b as u32) * 249 + 1014) >> 11) & 0x1F) * intensity / 100;
