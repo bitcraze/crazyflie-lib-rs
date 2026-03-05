@@ -275,6 +275,18 @@ impl Param {
             .writable)
     }
 
+    /// Return true if the parameter has extended type information.
+    ///
+    /// Return an error if the parameter does not exist.
+    pub fn has_extended_type(&self, name: &str) -> Result<bool> {
+        Ok(self
+            .toc
+            .get(name)
+            .ok_or_else(|| not_found(name))?
+            .1
+            .has_extended_type)
+    }
+
     /// Set a parameter value.
     ///
     /// This function will set the variable value and wait for confirmation from the
@@ -512,7 +524,14 @@ impl Param {
     ///
     /// Returns an error if the parameter does not exist or does not have extended type information.
     pub async fn get_extended_type(&self, name: &str) -> Result<u8> {
-        let (param_id, _) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+        let (param_id, param_info) = self.toc.get(name).ok_or_else(|| not_found(name))?;
+
+        if !param_info.has_extended_type {
+            return Err(Error::ParamError(format!(
+                "Parameter '{}' does not have extended type info",
+                name
+            )));
+        }
 
         // Send request: [CMD(1), ID(2)]
         let request_data = vec![
