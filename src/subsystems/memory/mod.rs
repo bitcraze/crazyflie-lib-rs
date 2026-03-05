@@ -23,6 +23,7 @@ mod ow;
 mod trajectory;
 mod lighthouse;
 mod loco2;
+mod led_driver;
 
 use crate::crazyflie::MEMORY_PORT;
 
@@ -34,6 +35,7 @@ pub use ow::*;
 pub use trajectory::*;
 pub use lighthouse::*;
 pub use loco2::*;
+pub use led_driver::*;
 
 /// # Access to the Crazyflie Memory Subsystem
 ///
