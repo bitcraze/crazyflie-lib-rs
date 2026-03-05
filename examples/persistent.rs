@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let test_param = "ring.effect";
     if !cf.param.has_extended_type(test_param)? {
-        return Err(format!("{} is known to have extended type", test_param).into());
+        return Err(format!("{} is expected to have extended type, but TOC reports none", test_param).into());
     }
     let extended_type = cf.param.get_extended_type(test_param).await?;
     println!("{} extended type: 0x{:02x}", test_param, extended_type);
