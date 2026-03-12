@@ -258,7 +258,7 @@ impl std::fmt::Display for MemoryType {
             MemoryType::Loco2 => "Loco2",
             MemoryType::Lighthouse => "Lighthouse",
             MemoryType::MemoryTester => "Memory Tester",
-            MemoryType::MicroSD => "Micro SD Deck",
+            MemoryType::MicroSD => "microSD Deck",
             MemoryType::DriverLedTiming => "Driver LED Timing",
             MemoryType::App => "Application",
             MemoryType::DeckMemory => "Deck Memory",
