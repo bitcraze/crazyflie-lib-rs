@@ -201,6 +201,8 @@ pub enum MemoryType {
     Lighthouse = 0x14,
     /// Memory tester type
     MemoryTester = 0x15,
+    /// USD deck (micro SD card) memory type
+    Usd = 0x16,
     /// Driver LED timing type
     DriverLedTiming = 0x17,
     /// Application memory type
@@ -232,6 +234,7 @@ impl TryFrom<u8> for MemoryType {
             0x13 => Ok(MemoryType::Loco2),
             0x14 => Ok(MemoryType::Lighthouse),
             0x15 => Ok(MemoryType::MemoryTester),
+            0x16 => Ok(MemoryType::Usd),
             0x17 => Ok(MemoryType::DriverLedTiming),
             0x18 => Ok(MemoryType::App),
             0x19 => Ok(MemoryType::DeckMemory),
@@ -255,6 +258,7 @@ impl std::fmt::Display for MemoryType {
             MemoryType::Loco2 => "Loco2",
             MemoryType::Lighthouse => "Lighthouse",
             MemoryType::MemoryTester => "Memory Tester",
+            MemoryType::Usd => "USD Deck",
             MemoryType::DriverLedTiming => "Driver LED Timing",
             MemoryType::App => "Application",
             MemoryType::DeckMemory => "Deck Memory",
