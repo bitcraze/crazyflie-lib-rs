@@ -184,6 +184,7 @@ pub trait FromMemoryBackend: Sized {
 
 /// The memory types supported by the Crazyflie
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MemoryType {
     /// The I2C EEPROM configuration memory on the Crazyflie
     EEPROMConfig = 0x00,
