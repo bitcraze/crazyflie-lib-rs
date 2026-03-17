@@ -184,6 +184,7 @@ pub trait FromMemoryBackend: Sized {
 
 /// The memory types supported by the Crazyflie
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MemoryType {
     /// The I2C EEPROM configuration memory on the Crazyflie
     EEPROMConfig = 0x00,
@@ -201,6 +202,8 @@ pub enum MemoryType {
     Lighthouse = 0x14,
     /// Memory tester type
     MemoryTester = 0x15,
+    /// Micro SD deck (micro SD card) memory type
+    MicroSD = 0x16,
     /// Driver LED timing type
     DriverLedTiming = 0x17,
     /// Application memory type
@@ -232,6 +235,7 @@ impl TryFrom<u8> for MemoryType {
             0x13 => Ok(MemoryType::Loco2),
             0x14 => Ok(MemoryType::Lighthouse),
             0x15 => Ok(MemoryType::MemoryTester),
+            0x16 => Ok(MemoryType::MicroSD),
             0x17 => Ok(MemoryType::DriverLedTiming),
             0x18 => Ok(MemoryType::App),
             0x19 => Ok(MemoryType::DeckMemory),
@@ -255,6 +259,7 @@ impl std::fmt::Display for MemoryType {
             MemoryType::Loco2 => "Loco2",
             MemoryType::Lighthouse => "Lighthouse",
             MemoryType::MemoryTester => "Memory Tester",
+            MemoryType::MicroSD => "microSD Deck",
             MemoryType::DriverLedTiming => "Driver LED Timing",
             MemoryType::App => "Application",
             MemoryType::DeckMemory => "Deck Memory",
