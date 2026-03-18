@@ -70,9 +70,9 @@ enum NrfCommand {
     /// Power off nRF51, STM32, and decks. Named `AllOff` in firmware.
     PowerOffAll = 0x01,
     /// Power off STM32 and decks, keeping nRF51 alive. Named `SysOff` in firmware.
-    PowerOffStm32 = 0x02,
+    PowerOffStm32Domain = 0x02,
     /// Power on STM32 and decks. Named `SysOn` in firmware.
-    PowerOnStm32 = 0x03,
+    PowerOnStm32Domain = 0x03,
 }
 
 // CRTP ports
@@ -274,22 +274,22 @@ impl Crazyflie {
     /// Power off the STM32 and deck subsystem
     ///
     /// Cuts power to the STM32 and decks while keeping the nRF51 powered.
-    /// The Crazyflie can be powered on again via [`Crazyflie::power_on_stm32`].
+    /// The Crazyflie can be powered on again via [`Crazyflie::power_on_stm32_domain`].
     ///
     /// This does not require a full Crazyflie connection — it opens a temporary link,
     /// sends the command, and closes the link.
-    pub async fn power_off_stm32(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
-        Self::send_nrf_command(link_context, uri, NrfCommand::PowerOffStm32).await
+    pub async fn power_off_stm32_domain(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
+        Self::send_nrf_command(link_context, uri, NrfCommand::PowerOffStm32Domain).await
     }
 
     /// Power on the STM32 and deck subsystem
     ///
-    /// Powers the STM32 and decks back on after a [`Crazyflie::power_off_stm32`].
+    /// Powers the STM32 and decks back on after a [`Crazyflie::power_off_stm32_domain`].
     ///
     /// This does not require a full Crazyflie connection — it opens a temporary link,
     /// sends the command, and closes the link.
-    pub async fn power_on_stm32(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
-        Self::send_nrf_command(link_context, uri, NrfCommand::PowerOnStm32).await
+    pub async fn power_on_stm32_domain(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
+        Self::send_nrf_command(link_context, uri, NrfCommand::PowerOnStm32Domain).await
     }
 
     /// Power off the Crazyflie completely
