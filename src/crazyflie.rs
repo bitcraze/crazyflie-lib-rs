@@ -66,7 +66,7 @@ impl Drop for ConnectGuard {
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
-enum NrfBootloaderCommand {
+enum NrfCommand {
     AllOff = 0x01,
     SysOff = 0x02,
     SysOn = 0x03,
@@ -276,7 +276,7 @@ impl Crazyflie {
     /// This does not require a full Crazyflie connection — it opens a temporary link,
     /// sends the command, and closes the link.
     pub async fn power_off_stm32(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
-        Self::send_nrf_command(link_context, uri, NrfBootloaderCommand::SysOff).await
+        Self::send_nrf_command(link_context, uri, NrfCommand::SysOff).await
     }
 
     /// Power on the STM32 and deck subsystem
@@ -286,7 +286,7 @@ impl Crazyflie {
     /// This does not require a full Crazyflie connection — it opens a temporary link,
     /// sends the command, and closes the link.
     pub async fn power_on_stm32(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
-        Self::send_nrf_command(link_context, uri, NrfBootloaderCommand::SysOn).await
+        Self::send_nrf_command(link_context, uri, NrfCommand::SysOn).await
     }
 
     /// Power off the Crazyflie completely
@@ -297,14 +297,14 @@ impl Crazyflie {
     /// This does not require a full Crazyflie connection — it opens a temporary link,
     /// sends the command, and closes the link.
     pub async fn power_off_all(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
-        Self::send_nrf_command(link_context, uri, NrfBootloaderCommand::AllOff).await
+        Self::send_nrf_command(link_context, uri, NrfCommand::AllOff).await
     }
 
     /// Send a bootloader command to the nRF51
     async fn send_nrf_command(
         link_context: &crazyflie_link::LinkContext,
         uri: &str,
-        cmd: NrfBootloaderCommand,
+        cmd: NrfCommand,
     ) -> Result<()> {
         const TARGET_NRF51: u8 = 0xFE;
 
