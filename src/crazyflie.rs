@@ -64,6 +64,14 @@ impl Drop for ConnectGuard {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy)]
+enum NrfBootloaderCommand {
+    AllOff = 0x01,
+    SysOff = 0x02,
+    SysOn = 0x03,
+}
+
 // CRTP ports
 pub(crate) const CONSOLE_PORT: u8 = 0;
 pub(crate) const PARAM_PORT: u8 = 2;
@@ -258,6 +266,53 @@ impl Crazyflie {
         }
 
         self.link.close().await;
+    }
+
+    /// Power off the STM32 and deck subsystem
+    ///
+    /// Cuts power to the STM32 and decks while keeping the nRF51 powered.
+    /// The Crazyflie can be powered on again via [`Crazyflie::power_on_stm32`].
+    ///
+    /// This does not require a full Crazyflie connection — it opens a temporary link,
+    /// sends the command, and closes the link.
+    pub async fn power_off_stm32(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
+        Self::send_nrf_command(link_context, uri, NrfBootloaderCommand::SysOff).await
+    }
+
+    /// Power on the STM32 and deck subsystem
+    ///
+    /// Powers the STM32 and decks back on after a [`Crazyflie::power_off_stm32`].
+    ///
+    /// This does not require a full Crazyflie connection — it opens a temporary link,
+    /// sends the command, and closes the link.
+    pub async fn power_on_stm32(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
+        Self::send_nrf_command(link_context, uri, NrfBootloaderCommand::SysOn).await
+    }
+
+    /// Power off the Crazyflie completely
+    ///
+    /// Powers off the nRF51, STM32, and deck subsystem. This is equivalent to
+    /// pressing the power button — the Crazyflie cannot be woken up via radio after this.
+    ///
+    /// This does not require a full Crazyflie connection — it opens a temporary link,
+    /// sends the command, and closes the link.
+    pub async fn power_off_all(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
+        Self::send_nrf_command(link_context, uri, NrfBootloaderCommand::AllOff).await
+    }
+
+    /// Send a bootloader command to the nRF51
+    async fn send_nrf_command(
+        link_context: &crazyflie_link::LinkContext,
+        uri: &str,
+        cmd: NrfBootloaderCommand,
+    ) -> Result<()> {
+        const TARGET_NRF51: u8 = 0xFE;
+
+        let link = link_context.open_link(uri).await?;
+        let packet: crazyflie_link::Packet = vec![0xFF, TARGET_NRF51, cmd as u8].into();
+        link.send_packet(packet).await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        Ok(())
     }
 
     /// Wait for the Crazyflie to be disconnected
