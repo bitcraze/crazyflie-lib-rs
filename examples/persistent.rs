@@ -17,13 +17,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Checking Extended Type Support ===");
     
     let test_param = "ring.effect";
-    match cf.param.get_extended_type(test_param).await {
-        Ok(extended_type) => {
-            println!("{} extended type: 0x{:02x}", test_param, extended_type);
-            println!("  PERSISTENT flag: {}", if (extended_type & 0x01) != 0 { "Yes" } else { "No" });
-        }
-        Err(e) => println!("Error getting extended type: {}", e),
+    if !cf.param.has_extended_type(test_param)? {
+        return Err(format!("{} is expected to have extended type, but TOC reports none", test_param).into());
     }
+    let extended_type = cf.param.get_extended_type(test_param).await?;
+    println!("{} extended type: 0x{:02x}", test_param, extended_type);
+    println!("  PERSISTENT flag: {}", if (extended_type & 0x01) != 0 { "Yes" } else { "No" });
     
     println!("\n=== Persistent Parameters ===");
     let mut persistent_params = Vec::new();
