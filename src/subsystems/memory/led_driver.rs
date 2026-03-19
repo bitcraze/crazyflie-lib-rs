@@ -18,7 +18,7 @@ pub struct Led {
     pub g: u8,
     /// Blue component (0-255)
     pub b: u8,
-    /// Intensity percentage (0-100)
+    /// Intensity percentage (0-100). Values above 100 are clamped to 100 at write time.
     pub intensity: u8,
 }
 
