@@ -18,7 +18,7 @@
 //! | Link Service | Full |
 //! | Localization | Full |
 //! | Log | Full (V2) |
-//! | Memory | None |
+//! | Memory | Partial |
 //! | Param | Full(V2) |
 //! | Platform | Full |
 //!

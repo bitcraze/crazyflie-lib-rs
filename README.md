@@ -1,8 +1,6 @@
 # Crazyflie lib
 
-Rust Crate to connect and control a [Crazyflie]. This crate is still very much work in progress,
-not all Crazyflie functionalities are implemented. The current state should be good enough
-to implement a clone of the Crazyflie client's [flight tab].
+Rust Crate to connect and control a [Crazyflie].
 
 ## Status
 
@@ -14,15 +12,16 @@ The following subsystems are or need to be implemented:
    - [x] Generic setpoints
  - [x] Console
  - [x] High-level commander
+ - [x] Link service
  - [x] Localization
  - [x] Log subsystem
  - [ ] Memory subsystem
    - [x] EEPROMConfig
    - [x] OneWire
-   - [ ] DriverLed
+   - [x] DriverLed
    - [ ] Loco
    - [x] Trajectory
-   - [ ] Loco2
+   - [x] Loco2
    - [x] Lighthouse
    - [ ] MemoryTester
    - [ ] DriverLedTiming
@@ -35,8 +34,6 @@ The following subsystems are or need to be implemented:
 
 The [python Crazyflie lib] implements a bunch of higher-level functionality like [swarm support] helpers. Those are out of scope of this crate and will need to be implemented in another specialized crate.
 
-
 [Crazyflie]: https://www.bitcraze.io/products/crazyflie-2-1/
-[Flight tab]: https://www.bitcraze.io/documentation/repository/crazyflie-clients-python/master/userguides/userguide_client/flightcontrol_tab/
 [python Crazyflie lib]: https://github.com/bitcraze/crazyflie-lib-python
 [swarm support]: https://www.bitcraze.io/documentation/repository/crazyflie-lib-python/master/api/cflib/crazyflie/swarm/
