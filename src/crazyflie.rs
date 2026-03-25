@@ -276,20 +276,20 @@ impl Crazyflie {
     /// Cuts power to the STM32 and decks while keeping the nRF51 powered.
     /// The Crazyflie can be powered on again via [`Crazyflie::power_on_stm32_domain`].
     ///
-    /// This does not require a full Crazyflie connection — it opens a temporary link,
-    /// sends the command, and closes the link.
-    pub async fn power_off_stm32_domain(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
-        Self::send_nrf_command(link_context, uri, NrfCommand::PowerOffStm32Domain).await
+    /// This does not require a full Crazyflie connection — it sends a single
+    /// no-ack packet directly via the radio.
+    pub async fn power_off_stm32_domain(uri: &str) -> Result<()> {
+        Self::send_nrf_command(uri, NrfCommand::PowerOffStm32Domain).await
     }
 
     /// Power on the STM32 and deck subsystem
     ///
     /// Powers the STM32 and decks back on after a [`Crazyflie::power_off_stm32_domain`].
     ///
-    /// This does not require a full Crazyflie connection — it opens a temporary link,
-    /// sends the command, and closes the link.
-    pub async fn power_on_stm32_domain(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
-        Self::send_nrf_command(link_context, uri, NrfCommand::PowerOnStm32Domain).await
+    /// This does not require a full Crazyflie connection — it sends a single
+    /// no-ack packet directly via the radio.
+    pub async fn power_on_stm32_domain(uri: &str) -> Result<()> {
+        Self::send_nrf_command(uri, NrfCommand::PowerOnStm32Domain).await
     }
 
     /// Power off the Crazyflie completely
@@ -297,26 +297,34 @@ impl Crazyflie {
     /// Powers off the nRF51, STM32, and deck subsystem. This is equivalent to
     /// pressing the power button — the Crazyflie cannot be woken up via radio after this.
     ///
-    /// This does not require a full Crazyflie connection — it opens a temporary link,
-    /// sends the command, and closes the link.
-    pub async fn power_off_all(link_context: &crazyflie_link::LinkContext, uri: &str) -> Result<()> {
-        Self::send_nrf_command(link_context, uri, NrfCommand::PowerOffAll).await
+    /// This does not require a full Crazyflie connection — it sends a single
+    /// no-ack packet directly via the radio.
+    pub async fn power_off_all(uri: &str) -> Result<()> {
+        Self::send_nrf_command(uri, NrfCommand::PowerOffAll).await
     }
 
     /// Send power management commands directly to the nRF51 without needing a full Crazyflie connection
     async fn send_nrf_command(
-        link_context: &crazyflie_link::LinkContext,
         uri: &str,
         cmd: NrfCommand,
     ) -> Result<()> {
         const TARGET_NRF51: u8 = 0xFE;
 
-        let link = link_context.open_link(uri).await?;
-        let packet: crazyflie_link::Packet = vec![0xFF, TARGET_NRF51, cmd as u8].into();
-        link.send_packet(packet).await?;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        // Best-effort close: ignore errors in case the target has already powered down.
-        let _ = link.close().await;
+        let bad_uri = || Error::InvalidArgument(format!("Invalid URI: {}", uri));
+
+        // Parse radio://<nth>/<channel>/<rate>/<address>
+        let rest = uri.strip_prefix("radio://").ok_or_else(bad_uri)?;
+        let parts: Vec<&str> = rest.split('?').next().unwrap().split('/').collect();
+        if parts.len() < 4 { return Err(bad_uri()); }
+        let radio_nth: usize = parts[0].parse().map_err(|_| bad_uri())?;
+        let channel = crazyradio::Channel::from_number(parts[1].parse().map_err(|_| bad_uri())?).map_err(|_| bad_uri())?;
+        let address = <[u8; 5]>::try_from(
+            hex::decode(format!("{:0>10}", parts[3])).map_err(|_| bad_uri())?.as_slice()
+        ).map_err(|_| bad_uri())?;
+
+        let radio = crazyradio::Crazyradio::open_nth(radio_nth).map_err(|e| Error::InvalidArgument(format!("Cannot open radio: {}", e)))?;
+        let mut radio = crazyradio::SharedCrazyradio::new(radio);
+        radio.send_packet_no_ack_async(channel, address, vec![0xFF, TARGET_NRF51, cmd as u8]).await.map_err(|e| Error::InvalidArgument(format!("Radio send error: {}", e)))?;
         Ok(())
     }
 
