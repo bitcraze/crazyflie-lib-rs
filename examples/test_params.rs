@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     // Launch a task to watch param changes
-    let mut param_watcher = crazyflie.param.watch_change().await;
+    let mut param_watcher = crazyflie.param.watch_change().await?;
     tokio::spawn(async move {
         while let Some((name, value)) = param_watcher.next().await {
             println!(
@@ -49,6 +49,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     let val = crazyflie.param.get_lossy("pid_attitude.yaw_kd").await?;
     println!("Param value: {}", val);
+
+    println!("Disconnecting...");
+    crazyflie.disconnect().await;
+    println!("Done.");
+
+    println!("Trying to watch parameter changes...");
+    let param_watcher_2 = crazyflie.param.watch_change().await;
+    match param_watcher_2 {
+        Ok(_) => println!("This should not happen - no Crazyflie connected"),
+        Err(msg) => println!("Watching changes is not possible when no Crazyflie is connected. This is correct! Error message: {msg}")
+    }
 
     Ok(())
 }
