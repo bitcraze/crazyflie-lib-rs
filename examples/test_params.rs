@@ -4,10 +4,15 @@ use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let uri = std::env::args()
+        .skip_while(|a| a != "--uri")
+        .nth(1)
+        .unwrap_or_else(|| "radio://0/60/2M/E7E7E7E7E7".to_string());
+
     let context = LinkContext::new();
     let crazyflie = Crazyflie::connect_from_uri(
         &context,
-        "radio://0/60/2M/E7E7E7E7E7",
+        &uri,
         crazyflie_lib::NoTocCache
     )
     .await?;
