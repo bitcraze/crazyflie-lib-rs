@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Trying to watch parameter changes...");
     let param_watcher_2 = crazyflie.param.watch_change().await;
     match param_watcher_2 {
-        Ok(_) => println!("This should not happen - no Crazyflie connected"),
+        Ok(_) => unreachable!("watch_change() should have returned an error when no Crazyflie is connected."),
         Err(msg) => println!("Watching changes is not possible when no Crazyflie is connected. This is correct! Error message: {msg}")
     }
 
