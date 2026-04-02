@@ -242,7 +242,7 @@ impl Param {
                 }
             }
             values.lock().await.clear();
-            watchers.lock().await.clear(); // Drops all tx senders and makes rx return None on .next()
+            watchers.lock().await.clear(); // Drops all tx senders, killing the stream
         });
     }
 
