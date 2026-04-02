@@ -239,6 +239,22 @@ impl DeckMemorySection {
         &self.name
     }
 
+    /// Set the expected size of new firmware to be written to this deck section.
+    ///
+    /// This must be called before writing firmware data to the section.
+    /// The firmware uses this size to configure the flash operation (e.g., to
+    /// determine how much flash to erase and how many data blocks to expect).
+    ///
+    /// # Arguments
+    /// * `size` - The size of the firmware binary in bytes.
+    pub async fn set_new_firmware_size(&self, size: u32) -> Result<()> {
+        self.memory
+            .lock()
+            .await
+            .write::<fn(usize, usize)>(self.command_address, &size.to_le_bytes(), None)
+            .await
+    }
+
     /// Reset the MCU connected to this memory section into bootloader mode.
     ///
     /// # Returns
