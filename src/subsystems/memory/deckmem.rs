@@ -248,6 +248,12 @@ impl DeckMemorySection {
     /// # Arguments
     /// * `size` - The size of the firmware binary in bytes.
     pub async fn set_new_firmware_size(&self, size: u32) -> Result<()> {
+        if !self.supports_upgrade {
+            return Err(Error::MemoryError(
+                "Section does not support firmware upgrade".to_owned(),
+            ));
+        }
+
         self.memory
             .lock()
             .await
