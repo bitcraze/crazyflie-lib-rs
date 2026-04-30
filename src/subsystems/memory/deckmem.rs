@@ -27,6 +27,7 @@ const DECKMEM_INFO_OFFSET: usize = 1;
 const DECKMEM_INFO_SIZE: usize = 0x20;
 const DECKMEM_CMD_OFFSET: usize = 0x1000;
 const DECKMEM_CMD_SIZE: usize = 0x20;
+const DECKMEM_CMD_NEW_FW_SIZE_OFFSET: usize = 0x0;
 const DECKMEM_CMD_BITS_OFFSET: usize = 0x4;
 
 const DECKMEM_CMD_RST_TO_FIRMWARE: u8 = 0x01;
@@ -257,7 +258,7 @@ impl DeckMemorySection {
         self.memory
             .lock()
             .await
-            .write::<fn(usize, usize)>(self.command_address, &size.to_le_bytes(), None)
+            .write::<fn(usize, usize)>(self.command_address + DECKMEM_CMD_NEW_FW_SIZE_OFFSET, &size.to_le_bytes(), None)
             .await
     }
 
