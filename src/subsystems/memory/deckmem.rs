@@ -240,25 +240,65 @@ impl DeckMemorySection {
         &self.name
     }
 
-    /// Set the expected size of new firmware to be written to this deck section.
+    /// Flash a complete firmware binary to this deck section.
     ///
-    /// This must be called before writing firmware data to the section.
-    /// The firmware uses this size to configure the flash operation (e.g., to
-    /// determine how much flash to erase and how many data blocks to expect).
+    /// Writes the firmware size to the deck's command section, then writes the
+    /// firmware bytes to the section's base address. The size step is required
+    /// by some deck flashers (e.g. AI-deck ESP and GAP8) and silently ignored
+    /// by others; bundling it into this single call ensures it is never
+    /// skipped.
     ///
-    /// # Arguments
-    /// * `size` - The size of the firmware binary in bytes.
-    pub async fn set_new_firmware_size(&self, size: u32) -> Result<()> {
+    /// # Errors
+    /// Returns an error if the section does not support firmware upgrade or
+    /// if any underlying write fails.
+    pub async fn flash_firmware(&self, data: &[u8]) -> Result<()> {
         if !self.supports_upgrade {
             return Err(Error::MemoryError(
                 "Section does not support firmware upgrade".to_owned(),
             ));
         }
 
+        self.write_new_firmware_size(data.len() as u32).await?;
+        self.write(0, data).await
+    }
+
+    /// Flash a complete firmware binary to this deck section, reporting
+    /// progress on the data write.
+    ///
+    /// The callback is invoked with `(bytes_written_so_far, total_bytes)`
+    /// during the data phase. The size-write phase is a fixed 4 bytes and is
+    /// not reported.
+    ///
+    /// # Errors
+    /// Returns an error if the section does not support firmware upgrade or
+    /// if any underlying write fails.
+    pub async fn flash_firmware_with_progress<F>(
+        &self,
+        data: &[u8],
+        progress_callback: F,
+    ) -> Result<()>
+    where
+        F: FnMut(usize, usize),
+    {
+        if !self.supports_upgrade {
+            return Err(Error::MemoryError(
+                "Section does not support firmware upgrade".to_owned(),
+            ));
+        }
+
+        self.write_new_firmware_size(data.len() as u32).await?;
+        self.write_with_progress(0, data, progress_callback).await
+    }
+
+    async fn write_new_firmware_size(&self, size: u32) -> Result<()> {
         self.memory
             .lock()
             .await
-            .write::<fn(usize, usize)>(self.command_address + DECKMEM_CMD_NEW_FW_SIZE_OFFSET, &size.to_le_bytes(), None)
+            .write::<fn(usize, usize)>(
+                self.command_address + DECKMEM_CMD_NEW_FW_SIZE_OFFSET,
+                &size.to_le_bytes(),
+                None,
+            )
             .await
     }
 
@@ -326,7 +366,7 @@ impl DeckMemorySection {
     /// A `Result` indicating success or failure of the write operation.
     /// # Errors
     /// Returns an `Error` if the section does not support writing or if the write operation fails.
-    pub async fn write(&self, address: usize, data: &[u8]) -> Result<()> {
+    async fn write(&self, address: usize, data: &[u8]) -> Result<()> {
         if !self.supports_write {
             return Err(Error::MemoryError(
                 "Section does not support write".to_owned(),
@@ -352,7 +392,7 @@ impl DeckMemorySection {
     /// A `Result` indicating success or failure of the write operation.
     /// # Errors
     /// Returns an `Error` if the section does not support writing or if the write operation fails.
-    pub async fn write_with_progress<F>(
+    async fn write_with_progress<F>(
         &self,
         address: usize,
         data: &[u8],
