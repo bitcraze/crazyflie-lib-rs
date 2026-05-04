@@ -1,63 +1,61 @@
 //! # Supervisor subsystem
 //!
-//! The supervisor monitors the Crazyflie's system state and safety conditions. It manages:
-//! - System readiness (can be armed, is armed, can fly)
-//! - Flight state (is flying, is tumbled)
-//! - Safety state (is crashed, is locked)
-//! - High level commander state
+//! The supervisor monitors the Crazyflie's system state and exposes arming, crash recovery,
+//! and emergency stop controls. It is the primary interface for flight readiness and safety.
 //!
-//! ## Reading System State
+//! ## Reading system state
 //!
-//! Query the current system state using the supervisor info bitfield:
-//! ``` no_run
+//! Call [`Supervisor::read_bitfield`] to get a snapshot of the current system state.
+//! The returned [`SupervisorInfo`] exposes individual boolean flags:
+//! ```no_run
 //! # async fn read_state(crazyflie: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
-//! // Read the supervisor bitfield
 //! let info = crazyflie.supervisor.read_bitfield().await?;
-//! 
-//! // Check specific state flags
+//!
 //! if info.can_be_armed() {
-//!     println!("System can be armed");
-//! }
-//! if info.can_fly() {
-//!     println!("System is ready to fly");
+//!     println!("Ready to arm");
 //! }
 //! if info.is_flying() {
-//!     println!("System is flying");
+//!     println!("Currently airborne");
 //! }
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! ## Sending System Commands
+//! ## Arming and crash recovery
 //!
-//! The supervisor also allows sending arming and crash recovery commands:
-//! ``` no_run
-//! # async fn send_commands(crazyflie: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
+//! The Crazyflie must be armed before its motors will respond to setpoints.
+//! After a crash the firmware may allow recovery without a full reboot:
+//! ```no_run
+//! # async fn commands(crazyflie: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
 //! // Arm the system
 //! crazyflie.supervisor.send_arming_request(true).await?;
 //!
-//! // Disarm the system
+//! // Disarm
 //! crazyflie.supervisor.send_arming_request(false).await?;
 //!
-//! // Request crash recovery
+//! // Request recovery from a crashed state
 //! crazyflie.supervisor.send_crash_recovery_request().await?;
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! ## Available State Properties
+//! ## Emergency stop
 //!
-//! - `can_be_armed()` - System can be armed and will accept an arming command
-//! - `is_armed()` - System is currently armed
-//! - `is_auto_armed()` - System is configured to automatically arm
-//! - `can_fly()` - System is ready to fly
-//! - `is_flying()` - System is actively flying
-//! - `is_tumbled()` - System is upside down
-//! - `is_locked()` - System is in locked state and must be restarted
-//! - `is_crashed()` - System has crashed
-//! - `hl_control_active()` - High level commander is actively flying the drone
-//! - `hl_traj_finished()` - High level commander trajectory has finished
-//! - `hl_control_disabled()` - High level commander is disabled
+//! The emergency stop functionality allows immediate motor shutdown for safety. Two variants
+//! are available. The immediate stop cuts all motors at once and locks the firmware until reboot.
+//! The watchdog variant is softer: it arms a timer in the firmware that stops the motors if the
+//! message is not refreshed within 1000 ms, //! allowing controlled failsafe behaviour in a
+//! communication-loss scenario:
+//! ```no_run
+//! # async fn emergency(crazyflie: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
+//! // Cut motors immediately
+//! crazyflie.supervisor.send_emergency_stop().await?;
+//!
+//! // Or activate the watchdog — must be repeated every <1000 ms
+//! crazyflie.supervisor.send_emergency_stop_watchdog().await?;
+//! # Ok(())
+//! # }
+//! ```
 
 use crate::crtp_utils::crtp_channel_dispatcher;
 use crate::{Error, Result};
@@ -76,6 +74,8 @@ const SUPERVISOR_CH_COMMAND: u8 = 1;
 const CMD_GET_STATE_BITFIELD: u8 = 0x0C;
 const CMD_ARM_SYSTEM: u8 = 0x01;
 const CMD_RECOVER_SYSTEM: u8 = 0x02;
+const CMD_EMERGENCY_STOP: u8 = 0x03;
+const CMD_EMERGENCY_STOP_WATCHDOG: u8 = 0x04;
 
 // Bit positions
 const BIT_CAN_BE_ARMED: u8 = 0;
@@ -184,10 +184,7 @@ impl SupervisorInfo {
     }
 }
 
-/// # Access to the supervisor subsystem
-///
-/// The supervisor monitors system state and provides information about
-/// the flight readiness and safety status of the Crazyflie.
+/// Access to the supervisor subsystem
 ///
 /// See the [supervisor module documentation](crate::subsystems::supervisor) for more context and information.
 pub struct Supervisor {
@@ -332,6 +329,36 @@ impl Supervisor {
             SUPERVISOR_PORT,
             SUPERVISOR_CH_COMMAND,
             vec![CMD_RECOVER_SYSTEM],
+        );
+        self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
+        Ok(())
+    }
+
+    /// Send emergency stop
+    ///
+    /// Immediately stops all motors and puts the Crazyflie into a locked state.
+    /// The drone will require a reboot before it can fly again.
+    pub async fn send_emergency_stop(&self) -> Result<()> {
+        let pk = Packet::new(
+            SUPERVISOR_PORT,
+            SUPERVISOR_CH_COMMAND,
+            vec![CMD_EMERGENCY_STOP],
+        );
+        self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
+        Ok(())
+    }
+
+    /// Send emergency stop watchdog
+    ///
+    /// Activates/resets a watchdog failsafe that will automatically emergency stop
+    /// the drone if this message isn't sent every 1000ms. Once activated by the first
+    /// call, you must continue sending this periodically forever or the drone will
+    /// automatically emergency stop. Use only if you need automatic failsafe behavior.
+    pub async fn send_emergency_stop_watchdog(&self) -> Result<()> {
+        let pk = Packet::new(
+            SUPERVISOR_PORT,
+            SUPERVISOR_CH_COMMAND,
+            vec![CMD_EMERGENCY_STOP_WATCHDOG],
         );
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())

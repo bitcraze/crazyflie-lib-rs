@@ -1,19 +1,8 @@
 //! # Localization subsystem
 //!
 //! This subsystem provides access to the Crazyflie's localization services including
-//! emergency stop controls, external position/pose streaming, lighthouse positioning
+//! external position/pose streaming, lighthouse positioning
 //! system data, and Loco Positioning System (UWB) communication.
-//!
-//! ## Emergency Stop
-//!
-//! The emergency stop functionality allows immediate motor shutdown for safety:
-//! ```no_run
-//! # async fn emergency(crazyflie: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
-//! // Immediately stop all motors
-//! crazyflie.localization.emergency.send_emergency_stop().await?;
-//! # Ok(())
-//! # }
-//! ```
 //!
 //! ## External Position and Pose
 //!
@@ -237,8 +226,9 @@ pub struct EmergencyControl {
 impl EmergencyControl {
     /// Send emergency stop command
     ///
-    /// Immediately stops all motors and puts the Crazyflie into a locked state.
-    /// The drone will require a reboot before it can fly again.
+    /// # Deprecated
+    /// Use [`crate::subsystems::supervisor::Supervisor::send_emergency_stop`] instead.
+    #[deprecated(note = "Use crazyflie.supervisor.send_emergency_stop() instead")]
     pub async fn send_emergency_stop(&self) -> Result<()> {
         let mut payload = Vec::with_capacity(1);
         payload.push(EMERGENCY_STOP);
@@ -249,10 +239,9 @@ impl EmergencyControl {
 
     /// Send emergency stop watchdog
     ///
-    /// Activates/resets a watchdog failsafe that will automatically emergency stop
-    /// the drone if this message isn't sent every 1000ms. Once activated by the first
-    /// call, you must continue sending this periodically forever or the drone will
-    /// automatically emergency stop. Use only if you need automatic failsafe behavior.
+    /// # Deprecated
+    /// Use [`crate::subsystems::supervisor::Supervisor::send_emergency_stop_watchdog`] instead.
+    #[deprecated(note = "Use crazyflie.supervisor.send_emergency_stop_watchdog() instead")]
     pub async fn send_emergency_stop_watchdog(&self) -> Result<()> {
         let mut payload = Vec::with_capacity(1);
         payload.push(EMERGENCY_STOP_WATCHDOG);
