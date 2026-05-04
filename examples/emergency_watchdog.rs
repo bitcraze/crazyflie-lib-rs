@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: show how to check if supervisor has already locked (in log field)
 
     // Arm, unlock, start motors
-    crazyflie.platform.send_arming_request(true).await?;
+    crazyflie.supervisor.send_arming_request(true).await?;
     sleep(Duration::from_millis(300)).await;
     crazyflie.commander.setpoint_rpyt(0.0, 0.0, 0.0, 0).await?;
 
@@ -36,13 +36,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Activate watchdog
     println!("Activating watchdog (1000ms timeout)...");
-    crazyflie.localization.emergency.send_emergency_stop_watchdog().await?;
+    crazyflie.supervisor.send_emergency_stop_watchdog().await?;
 
     print!("Sending periodic messages: ");
     for i in 0..6 {
         print!("{}", i + 1);
         std::io::Write::flush(&mut std::io::stdout()).unwrap();
-        crazyflie.localization.emergency.send_emergency_stop_watchdog().await?;
+        crazyflie.supervisor.send_emergency_stop_watchdog().await?;
         if i < 5 {
             print!("...");
             std::io::Write::flush(&mut std::io::stdout()).unwrap();
