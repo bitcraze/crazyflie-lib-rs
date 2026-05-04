@@ -4,3 +4,4 @@ launch.json
 
 demos/target
 demos/Cargo.lock
+.worktrees/
