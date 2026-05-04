@@ -487,7 +487,7 @@ impl Param {
     ///    will send notification packet for every internal parameter change.
     pub async fn watch_change(&self) -> Result<impl futures::Stream<Item = (String, Value)> + use<>> {
         if self.uplink.is_disconnected() {
-            return Err(Error::Disconnected)
+            return Err(Error::Disconnected);
         }
         let (tx, rx) = futures::channel::mpsc::unbounded();
 
