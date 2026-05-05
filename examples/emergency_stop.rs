@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Connected! Demonstrating emergency stop...");
 
     // Arm, unlock, start motors
-    crazyflie.platform.send_arming_request(true).await?;
+    crazyflie.supervisor.send_arming_request(true).await?;
     sleep(Duration::from_millis(300)).await;
     crazyflie.commander.setpoint_rpyt(0.0, 0.0, 0.0, 0).await?;
 
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sleep(Duration::from_millis(1000)).await;
 
     println!("Sending emergency stop...");
-    crazyflie.localization.emergency.send_emergency_stop().await?;
+    crazyflie.supervisor.send_emergency_stop().await?;
 
     // Wait a moment to see the effect
     sleep(Duration::from_millis(500)).await;

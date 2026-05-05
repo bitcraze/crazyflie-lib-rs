@@ -18,8 +18,6 @@ const VERSION_CHANNEL: u8 = 1;
 const APP_CHANNEL: u8 = 2;
 
 const PLATFORM_SET_CONT_WAVE: u8 = 0;
-const PLATFORM_REQUEST_ARMING: u8 = 1;
-const PLATFORM_REQUEST_CRASH_RECOVERY: u8 = 2;
 
 const VERSION_GET_PROTOCOL: u8 = 0;
 const VERSION_GET_FIRMWARE: u8 = 1;
@@ -177,13 +175,19 @@ impl Platform {
     ///
     /// # Arguments
     /// * `do_arm` - true to arm, false to disarm
+    ///
+    /// # Deprecated
+    /// This method is deprecated. Use [`Supervisor::send_arming_request`](crate::subsystems::supervisor::Supervisor::send_arming_request) instead.
+    /// The supervisor port is the correct location for this functionality.
+    #[deprecated(since = "0.5.1", note = "Use Supervisor::send_arming_request instead")]
     pub async fn send_arming_request(&self, do_arm: bool) -> Result<()> {
-        let command = if do_arm { 1 } else { 0 };
+        // Route to supervisor port for compatibility
+        let command = if do_arm { 1u8 } else { 0u8 };
         self.uplink
             .send_async(Packet::new(
-                PLATFORM_PORT,
-                PLATFORM_COMMAND,
-                vec![PLATFORM_REQUEST_ARMING, command],
+                crate::crazyflie::SUPERVISOR_PORT,
+                1, // SUPERVISOR_CH_COMMAND
+                vec![0x01, command], // CMD_ARM_SYSTEM
             ))
             .await?;
         Ok(())
@@ -192,12 +196,18 @@ impl Platform {
     /// Send crash recovery request
     ///
     /// Requests recovery from a crash state detected by the Crazyflie.
+    ///
+    /// # Deprecated
+    /// This method is deprecated. Use [`Supervisor::send_crash_recovery_request`](crate::subsystems::supervisor::Supervisor::send_crash_recovery_request) instead.
+    /// The supervisor port is the correct location for this functionality.
+    #[deprecated(since = "0.5.1", note = "Use Supervisor::send_crash_recovery_request instead")]
     pub async fn send_crash_recovery_request(&self) -> Result<()> {
+        // Route to supervisor port for compatibility
         self.uplink
             .send_async(Packet::new(
-                PLATFORM_PORT,
-                PLATFORM_COMMAND,
-                vec![PLATFORM_REQUEST_CRASH_RECOVERY],
+                crate::crazyflie::SUPERVISOR_PORT,
+                1, // SUPERVISOR_CH_COMMAND
+                vec![0x02], // CMD_RECOVER_SYSTEM
             ))
             .await?;
         Ok(())
