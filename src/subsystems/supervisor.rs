@@ -222,18 +222,19 @@ impl Supervisor {
     /// ```
     pub async fn read_bitfield(&self) -> Result<SupervisorInfo> {
         let now = Self::current_time_ms();
-        let last_fetch = self.last_fetch_time.lock().unwrap();
-        let cached = self.cached_bitfield.lock().unwrap();
 
-        // Return cached value if it's recent enough
-        if let Some(bitfield) = *cached {
-            if now - *last_fetch < self.cache_timeout_ms {
-                return Ok(SupervisorInfo::from_bits(bitfield));
+        // Block scope ensures the MutexGuards are dropped before any .await,
+        // keeping the future Send.
+        {
+            let last_fetch = self.last_fetch_time.lock().unwrap();
+            let cached = self.cached_bitfield.lock().unwrap();
+
+            if let Some(bitfield) = *cached {
+                if now - *last_fetch < self.cache_timeout_ms {
+                    return Ok(SupervisorInfo::from_bits(bitfield));
+                }
             }
         }
-
-        drop(last_fetch);
-        drop(cached);
 
         // Send request
         let pk = Packet::new(
