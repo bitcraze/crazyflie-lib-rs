@@ -27,6 +27,7 @@ const DECKMEM_INFO_OFFSET: usize = 1;
 const DECKMEM_INFO_SIZE: usize = 0x20;
 const DECKMEM_CMD_OFFSET: usize = 0x1000;
 const DECKMEM_CMD_SIZE: usize = 0x20;
+const DECKMEM_CMD_NEW_FW_SIZE_OFFSET: usize = 0x0;
 const DECKMEM_CMD_BITS_OFFSET: usize = 0x4;
 
 const DECKMEM_CMD_RST_TO_FIRMWARE: u8 = 0x01;
@@ -263,6 +264,39 @@ impl DeckMemorySection {
         // Sleep for 10 ms to allow the reset to complete
         sleep(Duration::from_millis(10)).await;
 
+        Ok(())
+    }
+
+    /// Tell the deck how large the next firmware image will be.
+    ///
+    /// The deck-side driver uses this to erase the right amount of
+    /// flash before the bulk write starts as well as to know when the
+    /// full firmware image has been received.
+    ///
+    /// Must be called before [`write`](Self::write) /
+    /// [`write_with_progress`](Self::write_with_progress); otherwise the
+    /// timing is not significant.
+    ///
+    /// # Errors
+    /// Returns an `Error` if `size_bytes` exceeds `u32::MAX` or the
+    /// underlying memory write fails.
+    pub async fn set_new_firmware_size(&self, size_bytes: usize) -> Result<()> {
+        let size_u32: u32 = size_bytes.try_into().map_err(|_| {
+            Error::MemoryError(format!(
+                "Firmware size {} does not fit in a u32",
+                size_bytes
+            ))
+        })?;
+        let bytes = size_u32.to_le_bytes();
+        self.memory
+            .lock()
+            .await
+            .write::<fn(usize, usize)>(
+                self.command_address + DECKMEM_CMD_NEW_FW_SIZE_OFFSET,
+                &bytes,
+                None,
+            )
+            .await?;
         Ok(())
     }
 
