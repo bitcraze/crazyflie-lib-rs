@@ -2,6 +2,7 @@ use crate::{crtp_utils::WaitForPacket, Error, Result};
 use crazyflie_link::Packet;
 use flume as channel;
 use std::convert::{TryFrom, TryInto};
+use std::str::FromStr;
 
 use crate::crazyflie::MEMORY_PORT;
 
@@ -244,6 +245,40 @@ impl TryFrom<u8> for MemoryType {
             0x1A => Ok(MemoryType::DeckMultiranger),
             0x1B => Ok(MemoryType::DeckPaa3905),
             _ => Ok(MemoryType::UNKNOWN),
+        }
+    }
+}
+
+impl FromStr for MemoryType {
+    type Err = Error;
+
+    /// Parse a memory type from its variant name (PascalCase, matching the
+    /// `Debug` representation), e.g. `"DeckCtrlDFU"`. The `UNKNOWN` sentinel
+    /// is intentionally not accepted.
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "EEPROMConfig" => Ok(MemoryType::EEPROMConfig),
+            "OneWire" => Ok(MemoryType::OneWire),
+            "DriverLed" => Ok(MemoryType::DriverLed),
+            "Loco" => Ok(MemoryType::Loco),
+            "Trajectory" => Ok(MemoryType::Trajectory),
+            "Loco2" => Ok(MemoryType::Loco2),
+            "Lighthouse" => Ok(MemoryType::Lighthouse),
+            "MemoryTester" => Ok(MemoryType::MemoryTester),
+            "MicroSD" => Ok(MemoryType::MicroSD),
+            "DriverLedTiming" => Ok(MemoryType::DriverLedTiming),
+            "App" => Ok(MemoryType::App),
+            "DeckMemory" => Ok(MemoryType::DeckMemory),
+            "DeckCtrlDFU" => Ok(MemoryType::DeckCtrlDFU),
+            "DeckCtrl" => Ok(MemoryType::DeckCtrl),
+            "DeckMultiranger" => Ok(MemoryType::DeckMultiranger),
+            "DeckPaa3905" => Ok(MemoryType::DeckPaa3905),
+            _ => Err(Error::InvalidArgument(format!(
+                "Unknown memory type '{}'. Valid types: EEPROMConfig, OneWire, DriverLed, \
+                 Loco, Trajectory, Loco2, Lighthouse, MemoryTester, MicroSD, DriverLedTiming, \
+                 App, DeckMemory, DeckCtrlDFU, DeckCtrl, DeckMultiranger, DeckPaa3905",
+                s
+            ))),
         }
     }
 }
