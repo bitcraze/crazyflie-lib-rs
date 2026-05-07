@@ -41,53 +41,68 @@ impl MemoryBackend {
     where
         F: FnMut(usize, usize),
     {
-        let mut data = vec![0; length];
-        let mut current_address = address;
-        while current_address < address + length {
-            let to_read = std::cmp::min(
-                MEM_MAX_REQUEST_SIZE,
-                (address + length) - current_address,
-            );
-            let mut request_data = Vec::new();
-            request_data.extend_from_slice(&self.memory_id.to_le_bytes());
-            request_data.extend_from_slice(&(current_address as u32).to_le_bytes());
-            request_data.extend_from_slice(&(to_read as u8).to_le_bytes());
-            let pk = Packet::new(MEMORY_PORT, READ_CHANNEL, request_data.clone());
-            self.uplink
-                .send_async(pk)
-                .await?;
+        // Responses arrive in send order (single firmware mem task), so we
+        // can match by front-of-queue prefix.
+        const PIPELINE_DEPTH: usize = 16;
 
+        let mut data = vec![0; length];
+        let end_address = address + length;
+        let mut next_send_address = address;
+
+        let mut in_flight: std::collections::VecDeque<(usize, [u8; 5], usize)> =
+            std::collections::VecDeque::with_capacity(PIPELINE_DEPTH);
+
+        while next_send_address < end_address || !in_flight.is_empty() {
+            while in_flight.len() < PIPELINE_DEPTH && next_send_address < end_address {
+                let to_read = std::cmp::min(
+                    MEM_MAX_REQUEST_SIZE,
+                    end_address - next_send_address,
+                );
+                let mut request_data = Vec::new();
+                request_data.extend_from_slice(&self.memory_id.to_le_bytes());
+                request_data.extend_from_slice(&(next_send_address as u32).to_le_bytes());
+                request_data.extend_from_slice(&(to_read as u8).to_le_bytes());
+                let mut prefix = [0u8; 5];
+                prefix.copy_from_slice(&request_data[0..5]);
+                let pk = Packet::new(MEMORY_PORT, READ_CHANNEL, request_data);
+                self.uplink.send_async(pk).await?;
+                in_flight.push_back((next_send_address, prefix, to_read));
+                next_send_address += to_read;
+            }
+
+            let (chunk_address, prefix, _to_read) = *in_flight.front().expect("non-empty");
             let pk = self
                 .read_downlink
-                .wait_packet(MEMORY_PORT, READ_CHANNEL, &request_data[0..5])
+                .wait_packet(MEMORY_PORT, READ_CHANNEL, &prefix)
                 .await?;
+            in_flight.pop_front();
 
             let pk_data = pk.get_data();
-
             if pk_data.len() < 6 {
                 return Err(Error::MemoryError("Malformed memory read response".into()));
             }
-
             let read_address = u32::from_le_bytes(pk_data[1..5].try_into().unwrap());
             let status = pk_data[5];
-
-            if pk_data.len() >= 6 && read_address == current_address as u32 && status == 0 {
-                let read_data = &pk_data[6..];
-                let start = (current_address - address) as usize;
-                let end = start + read_data.len();
-                data[start..end].copy_from_slice(read_data);
-            } else if status != 0 {
-                return Err(Error::MemoryError(format!("Memory read returned error status ({}) @ {}", status, current_address)));
-            } else {
+            if status != 0 {
+                return Err(Error::MemoryError(format!(
+                    "Memory read returned error status ({}) @ {}", status, chunk_address
+                )));
+            }
+            if read_address != chunk_address as u32 {
                 return Err(Error::MemoryError("Malformed memory read response".into()));
             }
-
-            current_address += to_read;
+            let read_data = &pk_data[6..];
+            let start = chunk_address - address;
+            let end = start + read_data.len();
+            data[start..end].copy_from_slice(read_data);
 
             if let Some(ref mut callback) = progress_callback {
-                callback(current_address - address, length);
+                let confirmed_end = in_flight
+                    .front()
+                    .map(|(addr, _, _)| *addr)
+                    .unwrap_or(next_send_address);
+                callback(confirmed_end - address, length);
             }
-            
         }
 
         Ok(data)
@@ -97,46 +112,62 @@ impl MemoryBackend {
     where
         F: FnMut(usize, usize),
     {
-        let mut current_address = address;
+        // Responses arrive in send order (single firmware mem task), so we
+        // can match by front-of-queue prefix.
+        const PIPELINE_DEPTH: usize = 16;
+
         let length = data.len();
-        while current_address < address + length {
-            let to_write = std::cmp::min(
-                MEM_MAX_REQUEST_SIZE,
-                (address + length) - current_address,
-            );
-            let start = (current_address - address) as usize;
-            let end = start + to_write;
-            let mut request_data = Vec::new();
-            request_data.extend_from_slice(&self.memory_id.to_le_bytes());
-            request_data.extend_from_slice(&(current_address as u32).to_le_bytes());
-            request_data.extend_from_slice(&data[start..end]);
-            let pk = Packet::new(MEMORY_PORT, WRITE_CHANNEL, request_data.clone());
+        let end_address = address + length;
+        let mut next_send_address = address;
 
-            self.uplink
-                .send_async(pk)
-                .await?;
-            current_address += to_write;
+        let mut in_flight: std::collections::VecDeque<(usize, [u8; 5])> =
+            std::collections::VecDeque::with_capacity(PIPELINE_DEPTH);
 
-            if let Some(ref mut callback) = progress_callback {
-                callback(current_address - address, length);
+        while next_send_address < end_address || !in_flight.is_empty() {
+            while in_flight.len() < PIPELINE_DEPTH && next_send_address < end_address {
+                let to_write = std::cmp::min(
+                    MEM_MAX_REQUEST_SIZE,
+                    end_address - next_send_address,
+                );
+                let start = next_send_address - address;
+                let end = start + to_write;
+                let mut request_data = Vec::new();
+                request_data.extend_from_slice(&self.memory_id.to_le_bytes());
+                request_data.extend_from_slice(&(next_send_address as u32).to_le_bytes());
+                request_data.extend_from_slice(&data[start..end]);
+                let mut prefix = [0u8; 5];
+                prefix.copy_from_slice(&request_data[0..5]);
+                let pk = Packet::new(MEMORY_PORT, WRITE_CHANNEL, request_data);
+                self.uplink.send_async(pk).await?;
+                in_flight.push_back((next_send_address, prefix));
+                next_send_address += to_write;
             }
 
+            let (chunk_address, prefix) = *in_flight.front().expect("non-empty by loop guard");
             let pk = self
                 .write_downlink
-                .wait_packet(MEMORY_PORT, WRITE_CHANNEL, &request_data[0..5])
+                .wait_packet(MEMORY_PORT, WRITE_CHANNEL, &prefix)
                 .await?;
+            in_flight.pop_front();
+
             let pk_data = pk.get_data();
-            
             if pk_data.len() < 6 {
                 return Err(Error::MemoryError("Malformed memory write response".into()));
             }
-            
             let status = pk_data[5];
             if status != 0 {
                 return Err(Error::MemoryError(format!(
                     "Memory write returned error status ({}) @ {}",
-                    status, current_address - to_write
+                    status, chunk_address
                 )));
+            }
+
+            if let Some(ref mut callback) = progress_callback {
+                let confirmed_end = in_flight
+                    .front()
+                    .map(|(addr, _)| *addr)
+                    .unwrap_or(next_send_address);
+                callback(confirmed_end - address, length);
             }
         }
         Ok(())
