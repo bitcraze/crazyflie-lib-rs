@@ -274,9 +274,7 @@ impl FromStr for MemoryType {
             "DeckMultiranger" => Ok(MemoryType::DeckMultiranger),
             "DeckPaa3905" => Ok(MemoryType::DeckPaa3905),
             _ => Err(Error::InvalidArgument(format!(
-                "Unknown memory type '{}'. Valid types: EEPROMConfig, OneWire, DriverLed, \
-                 Loco, Trajectory, Loco2, Lighthouse, MemoryTester, MicroSD, DriverLedTiming, \
-                 App, DeckMemory, DeckCtrlDFU, DeckCtrl, DeckMultiranger, DeckPaa3905",
+                "Unknown memory type '{}'",
                 s
             ))),
         }
