@@ -1,4 +1,4 @@
-use crate::{crtp_utils::WaitForPacket, Error, Result};
+use crate::{Error, Result};
 use crazyflie_link::Packet;
 use flume as channel;
 use std::collections::VecDeque;
@@ -14,27 +14,26 @@ const WRITE_CHANNEL: u8 = 2;
 const MEM_MAX_REQUEST_SIZE: usize = 24;
 const PIPELINE_DEPTH: usize = 16;
 
-// Best-effort bounded wait used after an error to consume responses for
+// Single overall deadline used after an error to consume responses for
 // requests we already put on the wire. Without this, a later read()/write()
-// to the same prefix could match the stale reply.
+// could match the stale reply.
 const DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 
-async fn drain_pending(
-    downlink: &channel::Receiver<Packet>,
-    channel_id: u8,
-    pending: &mut VecDeque<[u8; 5]>,
-) {
-    while let Some(&prefix) = pending.front() {
-        match tokio::time::timeout(
-            DRAIN_TIMEOUT,
-            downlink.wait_packet(MEMORY_PORT, channel_id, &prefix),
-        )
-        .await
+// Consume up to `count` packets from `downlink`, bounded by DRAIN_TIMEOUT in
+// total. The dispatcher in memory/mod.rs has already filtered the channel by
+// (channel, memory_id), so the only thing we need to do is empty it.
+async fn drain_pending(downlink: &channel::Receiver<Packet>, count: usize) {
+    let deadline = tokio::time::Instant::now() + DRAIN_TIMEOUT;
+    for _ in 0..count {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        if tokio::time::timeout(remaining, downlink.recv_async())
+            .await
+            .is_err()
         {
-            Ok(Ok(_)) => {
-                pending.pop_front();
-            }
-            _ => break,
+            break;
         }
     }
 }
@@ -102,13 +101,20 @@ impl MemoryBackend {
                 let (chunk_address, prefix, to_read) = *in_flight.front().expect("non-empty");
                 let pk = self
                     .read_downlink
-                    .wait_packet(MEMORY_PORT, READ_CHANNEL, &prefix)
-                    .await?;
+                    .recv_async()
+                    .await
+                    .map_err(|_| Error::Disconnected)?;
                 in_flight.pop_front();
 
                 let pk_data = pk.get_data();
                 if pk_data.len() < 6 {
                     return Err(Error::MemoryError("Malformed memory read response".into()));
+                }
+                if pk_data[..5] != prefix {
+                    return Err(Error::MemoryError(format!(
+                        "Out-of-order memory read response: expected prefix {:02x?}, got {:02x?}",
+                        prefix, &pk_data[..5]
+                    )));
                 }
                 let status = pk_data[5];
                 if status != 0 {
@@ -140,9 +146,7 @@ impl MemoryBackend {
         .await;
 
         if result.is_err() {
-            let mut pending: VecDeque<[u8; 5]> =
-                in_flight.iter().map(|(_, prefix, _)| *prefix).collect();
-            drain_pending(&self.read_downlink, READ_CHANNEL, &mut pending).await;
+            drain_pending(&self.read_downlink, in_flight.len()).await;
         }
 
         result.map(|_| data)
@@ -185,13 +189,20 @@ impl MemoryBackend {
                 let (chunk_address, prefix) = *in_flight.front().expect("non-empty by loop guard");
                 let pk = self
                     .write_downlink
-                    .wait_packet(MEMORY_PORT, WRITE_CHANNEL, &prefix)
-                    .await?;
+                    .recv_async()
+                    .await
+                    .map_err(|_| Error::Disconnected)?;
                 in_flight.pop_front();
 
                 let pk_data = pk.get_data();
                 if pk_data.len() < 6 {
                     return Err(Error::MemoryError("Malformed memory write response".into()));
+                }
+                if pk_data[..5] != prefix {
+                    return Err(Error::MemoryError(format!(
+                        "Out-of-order memory write response: expected prefix {:02x?}, got {:02x?}",
+                        prefix, &pk_data[..5]
+                    )));
                 }
                 let status = pk_data[5];
                 if status != 0 {
@@ -214,9 +225,7 @@ impl MemoryBackend {
         .await;
 
         if result.is_err() {
-            let mut pending: VecDeque<[u8; 5]> =
-                in_flight.iter().map(|(_, prefix)| *prefix).collect();
-            drain_pending(&self.write_downlink, WRITE_CHANNEL, &mut pending).await;
+            drain_pending(&self.write_downlink, in_flight.len()).await;
         }
 
         result
