@@ -91,7 +91,7 @@ impl MemoryBackend {
             let read_data = &pk_data[6..];
             if read_data.len() != to_read {
                 return Err(Error::MemoryError(format!(
-                    "Short memory read response @ {}: expected {} bytes, got {}",
+                    "Unexpected memory read response length @ {}: expected {} bytes, got {}",
                     chunk_address, to_read, read_data.len()
                 )));
             }
