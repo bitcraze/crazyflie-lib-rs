@@ -1,10 +1,9 @@
-use crate::{Error, Result};
+use crate::{crtp_utils::WaitForPacket, Error, Result};
 use crazyflie_link::Packet;
 use flume as channel;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::str::FromStr;
-use std::time::Duration;
 
 use crate::crazyflie::MEMORY_PORT;
 
@@ -13,30 +12,6 @@ const WRITE_CHANNEL: u8 = 2;
 
 const MEM_MAX_REQUEST_SIZE: usize = 24;
 const PIPELINE_DEPTH: usize = 16;
-
-// Single overall deadline used after an error to consume responses for
-// requests we already put on the wire. Without this, a later read()/write()
-// could match the stale reply.
-const DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
-
-// Consume up to `count` packets from `downlink`, bounded by DRAIN_TIMEOUT in
-// total. The dispatcher in memory/mod.rs has already filtered the channel by
-// (channel, memory_id), so the only thing we need to do is empty it.
-async fn drain_pending(downlink: &channel::Receiver<Packet>, count: usize) {
-    let deadline = tokio::time::Instant::now() + DRAIN_TIMEOUT;
-    for _ in 0..count {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            break;
-        }
-        if tokio::time::timeout(remaining, downlink.recv_async())
-            .await
-            .is_err()
-        {
-            break;
-        }
-    }
-}
 
 
 /// Description of a memory in the Crazyflie
@@ -70,8 +45,7 @@ impl MemoryBackend {
         F: FnMut(usize, usize),
     {
         // Responses arrive in send order (single firmware mem task), so we
-        // can match by front-of-queue prefix. The [memory_id, address] prefix
-        // also makes any address check on the response redundant.
+        // can match by front-of-queue prefix.
         let mut data = vec![0; length];
         let end_address = address + length;
         let mut next_send_address = address;
@@ -79,77 +53,62 @@ impl MemoryBackend {
         let mut in_flight: VecDeque<(usize, [u8; 5], usize)> =
             VecDeque::with_capacity(PIPELINE_DEPTH);
 
-        let result: Result<()> = async {
-            while next_send_address < end_address || !in_flight.is_empty() {
-                while in_flight.len() < PIPELINE_DEPTH && next_send_address < end_address {
-                    let to_read = std::cmp::min(
-                        MEM_MAX_REQUEST_SIZE,
-                        end_address - next_send_address,
-                    );
-                    let mut request_data = Vec::new();
-                    request_data.extend_from_slice(&self.memory_id.to_le_bytes());
-                    request_data.extend_from_slice(&(next_send_address as u32).to_le_bytes());
-                    request_data.extend_from_slice(&(to_read as u8).to_le_bytes());
-                    let mut prefix = [0u8; 5];
-                    prefix.copy_from_slice(&request_data[0..5]);
-                    let pk = Packet::new(MEMORY_PORT, READ_CHANNEL, request_data);
-                    self.uplink.send_async(pk).await?;
-                    in_flight.push_back((next_send_address, prefix, to_read));
-                    next_send_address += to_read;
-                }
-
-                let (chunk_address, prefix, to_read) = *in_flight.front().expect("non-empty");
-                let pk = self
-                    .read_downlink
-                    .recv_async()
-                    .await
-                    .map_err(|_| Error::Disconnected)?;
-                in_flight.pop_front();
-
-                let pk_data = pk.get_data();
-                if pk_data.len() < 6 {
-                    return Err(Error::MemoryError("Malformed memory read response".into()));
-                }
-                if pk_data[..5] != prefix {
-                    return Err(Error::MemoryError(format!(
-                        "Out-of-order memory read response: expected prefix {:02x?}, got {:02x?}",
-                        prefix, &pk_data[..5]
-                    )));
-                }
-                let status = pk_data[5];
-                if status != 0 {
-                    return Err(Error::MemoryError(format!(
-                        "Memory read returned error status ({}) @ {}", status, chunk_address
-                    )));
-                }
-                let read_data = &pk_data[6..];
-                if read_data.len() != to_read {
-                    return Err(Error::MemoryError(format!(
-                        "Short memory read response @ {}: expected {} bytes, got {}",
-                        chunk_address, to_read, read_data.len()
-                    )));
-                }
-                let start = chunk_address - address;
-                let end = start + read_data.len();
-                data[start..end].copy_from_slice(read_data);
-
-                if let Some(ref mut callback) = progress_callback {
-                    let confirmed_end = in_flight
-                        .front()
-                        .map(|(addr, _, _)| *addr)
-                        .unwrap_or(next_send_address);
-                    callback(confirmed_end - address, length);
-                }
+        while next_send_address < end_address || !in_flight.is_empty() {
+            while in_flight.len() < PIPELINE_DEPTH && next_send_address < end_address {
+                let to_read = std::cmp::min(
+                    MEM_MAX_REQUEST_SIZE,
+                    end_address - next_send_address,
+                );
+                let mut request_data = Vec::new();
+                request_data.extend_from_slice(&self.memory_id.to_le_bytes());
+                request_data.extend_from_slice(&(next_send_address as u32).to_le_bytes());
+                request_data.extend_from_slice(&(to_read as u8).to_le_bytes());
+                let mut prefix = [0u8; 5];
+                prefix.copy_from_slice(&request_data[0..5]);
+                let pk = Packet::new(MEMORY_PORT, READ_CHANNEL, request_data);
+                self.uplink.send_async(pk).await?;
+                in_flight.push_back((next_send_address, prefix, to_read));
+                next_send_address += to_read;
             }
-            Ok(())
-        }
-        .await;
 
-        if result.is_err() {
-            drain_pending(&self.read_downlink, in_flight.len()).await;
+            let (chunk_address, prefix, to_read) = *in_flight.front().expect("non-empty");
+            let pk = self
+                .read_downlink
+                .wait_packet(MEMORY_PORT, READ_CHANNEL, &prefix)
+                .await?;
+            in_flight.pop_front();
+
+            let pk_data = pk.get_data();
+            if pk_data.len() < 6 {
+                return Err(Error::MemoryError("Malformed memory read response".into()));
+            }
+            let status = pk_data[5];
+            if status != 0 {
+                return Err(Error::MemoryError(format!(
+                    "Memory read returned error status ({}) @ {}", status, chunk_address
+                )));
+            }
+            let read_data = &pk_data[6..];
+            if read_data.len() != to_read {
+                return Err(Error::MemoryError(format!(
+                    "Short memory read response @ {}: expected {} bytes, got {}",
+                    chunk_address, to_read, read_data.len()
+                )));
+            }
+            let start = chunk_address - address;
+            let end = start + read_data.len();
+            data[start..end].copy_from_slice(read_data);
+
+            if let Some(ref mut callback) = progress_callback {
+                let confirmed_end = in_flight
+                    .front()
+                    .map(|(addr, _, _)| *addr)
+                    .unwrap_or(next_send_address);
+                callback(confirmed_end - address, length);
+            }
         }
 
-        result.map(|_| data)
+        Ok(data)
     }
 
     pub(crate) async fn write<F>(&self, address: usize, data: &[u8], mut progress_callback: Option<F>) -> Result<()>
@@ -165,70 +124,54 @@ impl MemoryBackend {
         let mut in_flight: VecDeque<(usize, [u8; 5])> =
             VecDeque::with_capacity(PIPELINE_DEPTH);
 
-        let result: Result<()> = async {
-            while next_send_address < end_address || !in_flight.is_empty() {
-                while in_flight.len() < PIPELINE_DEPTH && next_send_address < end_address {
-                    let to_write = std::cmp::min(
-                        MEM_MAX_REQUEST_SIZE,
-                        end_address - next_send_address,
-                    );
-                    let start = next_send_address - address;
-                    let end = start + to_write;
-                    let mut request_data = Vec::new();
-                    request_data.extend_from_slice(&self.memory_id.to_le_bytes());
-                    request_data.extend_from_slice(&(next_send_address as u32).to_le_bytes());
-                    request_data.extend_from_slice(&data[start..end]);
-                    let mut prefix = [0u8; 5];
-                    prefix.copy_from_slice(&request_data[0..5]);
-                    let pk = Packet::new(MEMORY_PORT, WRITE_CHANNEL, request_data);
-                    self.uplink.send_async(pk).await?;
-                    in_flight.push_back((next_send_address, prefix));
-                    next_send_address += to_write;
-                }
-
-                let (chunk_address, prefix) = *in_flight.front().expect("non-empty by loop guard");
-                let pk = self
-                    .write_downlink
-                    .recv_async()
-                    .await
-                    .map_err(|_| Error::Disconnected)?;
-                in_flight.pop_front();
-
-                let pk_data = pk.get_data();
-                if pk_data.len() < 6 {
-                    return Err(Error::MemoryError("Malformed memory write response".into()));
-                }
-                if pk_data[..5] != prefix {
-                    return Err(Error::MemoryError(format!(
-                        "Out-of-order memory write response: expected prefix {:02x?}, got {:02x?}",
-                        prefix, &pk_data[..5]
-                    )));
-                }
-                let status = pk_data[5];
-                if status != 0 {
-                    return Err(Error::MemoryError(format!(
-                        "Memory write returned error status ({}) @ {}",
-                        status, chunk_address
-                    )));
-                }
-
-                if let Some(ref mut callback) = progress_callback {
-                    let confirmed_end = in_flight
-                        .front()
-                        .map(|(addr, _)| *addr)
-                        .unwrap_or(next_send_address);
-                    callback(confirmed_end - address, length);
-                }
+        while next_send_address < end_address || !in_flight.is_empty() {
+            while in_flight.len() < PIPELINE_DEPTH && next_send_address < end_address {
+                let to_write = std::cmp::min(
+                    MEM_MAX_REQUEST_SIZE,
+                    end_address - next_send_address,
+                );
+                let start = next_send_address - address;
+                let end = start + to_write;
+                let mut request_data = Vec::new();
+                request_data.extend_from_slice(&self.memory_id.to_le_bytes());
+                request_data.extend_from_slice(&(next_send_address as u32).to_le_bytes());
+                request_data.extend_from_slice(&data[start..end]);
+                let mut prefix = [0u8; 5];
+                prefix.copy_from_slice(&request_data[0..5]);
+                let pk = Packet::new(MEMORY_PORT, WRITE_CHANNEL, request_data);
+                self.uplink.send_async(pk).await?;
+                in_flight.push_back((next_send_address, prefix));
+                next_send_address += to_write;
             }
-            Ok(())
-        }
-        .await;
 
-        if result.is_err() {
-            drain_pending(&self.write_downlink, in_flight.len()).await;
-        }
+            let (chunk_address, prefix) = *in_flight.front().expect("non-empty by loop guard");
+            let pk = self
+                .write_downlink
+                .wait_packet(MEMORY_PORT, WRITE_CHANNEL, &prefix)
+                .await?;
+            in_flight.pop_front();
 
-        result
+            let pk_data = pk.get_data();
+            if pk_data.len() < 6 {
+                return Err(Error::MemoryError("Malformed memory write response".into()));
+            }
+            let status = pk_data[5];
+            if status != 0 {
+                return Err(Error::MemoryError(format!(
+                    "Memory write returned error status ({}) @ {}",
+                    status, chunk_address
+                )));
+            }
+
+            if let Some(ref mut callback) = progress_callback {
+                let confirmed_end = in_flight
+                    .front()
+                    .map(|(addr, _)| *addr)
+                    .unwrap_or(next_send_address);
+                callback(confirmed_end - address, length);
+            }
+        }
+        Ok(())
     }
 }
 
