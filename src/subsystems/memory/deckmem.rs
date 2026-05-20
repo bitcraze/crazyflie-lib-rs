@@ -258,7 +258,13 @@ impl DeckMemorySection {
             ));
         }
 
-        self.write_new_firmware_size(data.len() as u32).await?;
+        let size = u32::try_from(data.len()).map_err(|_| {
+            Error::MemoryError(format!(
+                "Firmware too large: {} bytes exceeds u32::MAX",
+                data.len()
+            ))
+        })?;
+        self.write_new_firmware_size(size).await?;
         self.write(0, data).await
     }
 
@@ -286,7 +292,13 @@ impl DeckMemorySection {
             ));
         }
 
-        self.write_new_firmware_size(data.len() as u32).await?;
+        let size = u32::try_from(data.len()).map_err(|_| {
+            Error::MemoryError(format!(
+                "Firmware too large: {} bytes exceeds u32::MAX",
+                data.len()
+            ))
+        })?;
+        self.write_new_firmware_size(size).await?;
         self.write_with_progress(0, data, progress_callback).await
     }
 
