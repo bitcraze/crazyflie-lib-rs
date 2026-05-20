@@ -1,20 +1,24 @@
-use std::{env, fs, process};
+use std::{env, fs, process, time::Duration};
 
 use crazyflie_lib::subsystems::memory::{DeckMemory, MemoryType};
+use tokio::time::{Instant, sleep};
+
+const BOOTLOADER_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const BOOTLOADER_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let uri = args.next().unwrap_or_else(|| {
         eprintln!("usage: flash_aideck_esp <radio-uri> <firmware.bin> [section-name]");
-        eprintln!("  default section-name: esp");
+        eprintln!("  default section-name: bcAI:esp");
         process::exit(1);
     });
     let path = args.next().unwrap_or_else(|| {
         eprintln!("usage: flash_aideck_esp <radio-uri> <firmware.bin> [section-name]");
         process::exit(1);
     });
-    let section_name = args.next().unwrap_or_else(|| "esp".to_owned());
+    let section_name = args.next().unwrap_or_else(|| "bcAI:esp".to_owned());
 
     let firmware = fs::read(&path)?;
     let size = firmware.len() as u32;
@@ -41,9 +45,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .ok_or("DeckMemory could not be opened")??;
 
-    let section = deck_memory
-        .section(&section_name)
-        .ok_or_else(|| format!("section '{}' not found", section_name))?;
+    let available: Vec<&str> = deck_memory
+        .sections()
+        .iter()
+        .map(|s| s.name())
+        .collect();
+    println!("Available deck memory sections: {:?}", available);
+
+    let section = deck_memory.section(&section_name).ok_or_else(|| {
+        format!(
+            "section '{}' not found; available sections: {:?}",
+            section_name, available
+        )
+    })?;
 
     if !section.supports_upgrade() {
         return Err(format!(
@@ -51,6 +65,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             section_name
         )
         .into());
+    }
+
+    if !section.can_reset_to_bootloader() {
+        return Err(format!(
+            "section '{}' cannot reset to bootloader",
+            section_name
+        )
+        .into());
+    }
+
+    if !section.bootloader_active().await? {
+        println!("Resetting deck to bootloader mode...");
+        section.reset_to_bootloader().await?;
+
+        let deadline = Instant::now() + BOOTLOADER_READY_TIMEOUT;
+        loop {
+            if section.bootloader_active().await? {
+                break;
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "section '{}' did not enter bootloader within {:?}",
+                    section_name, BOOTLOADER_READY_TIMEOUT
+                )
+                .into());
+            }
+            sleep(BOOTLOADER_POLL_INTERVAL).await;
+        }
+    } else {
+        println!("Deck already in bootloader mode.");
     }
 
     println!("Flashing {} bytes to section '{}'", size, section.name());
