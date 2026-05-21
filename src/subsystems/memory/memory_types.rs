@@ -13,6 +13,58 @@ const WRITE_CHANNEL: u8 = 2;
 const MEM_MAX_REQUEST_SIZE: usize = 24;
 const PIPELINE_DEPTH: usize = 16;
 
+/// Drain the responses for the `count` requests still in flight after a
+/// protocol error, so leftover packets don't desync the next operation on the
+/// same (persistent) downlink channel. Operations on a backend are serialized
+/// (the backend is moved out of its slot for the duration), so every packet on
+/// the channel belongs to this operation.
+///
+/// No timeout: a protocol error means the firmware is responding, so the
+/// remaining in-order responses are expected to follow. We stop early only if
+/// the link drops (receive error), since no further packets can then arrive.
+async fn drain_in_flight(downlink: &channel::Receiver<Packet>, count: usize) {
+    for _ in 0..count {
+        if downlink.recv_async().await.is_err() {
+            break;
+        }
+    }
+}
+
+/// Validate a memory read response and return its payload bytes.
+fn parse_read_response(pk_data: &[u8], expected_len: usize, chunk_address: usize) -> Result<&[u8]> {
+    if pk_data.len() < 6 {
+        return Err(Error::MemoryError("Malformed memory read response".into()));
+    }
+    let status = pk_data[5];
+    if status != 0 {
+        return Err(Error::MemoryError(format!(
+            "Memory read returned error status ({}) @ {}", status, chunk_address
+        )));
+    }
+    let read_data = &pk_data[6..];
+    if read_data.len() != expected_len {
+        return Err(Error::MemoryError(format!(
+            "Unexpected memory read response length @ {}: expected {} bytes, got {}",
+            chunk_address, expected_len, read_data.len()
+        )));
+    }
+    Ok(read_data)
+}
+
+/// Validate a memory write response (ack).
+fn parse_write_response(pk_data: &[u8], chunk_address: usize) -> Result<()> {
+    if pk_data.len() < 6 {
+        return Err(Error::MemoryError("Malformed memory write response".into()));
+    }
+    let status = pk_data[5];
+    if status != 0 {
+        return Err(Error::MemoryError(format!(
+            "Memory write returned error status ({}) @ {}", status, chunk_address
+        )));
+    }
+    Ok(())
+}
+
 
 /// Description of a memory in the Crazyflie
 #[derive(Debug)]
@@ -53,6 +105,11 @@ impl MemoryBackend {
         let mut in_flight: VecDeque<(usize, [u8; 5], usize)> =
             VecDeque::with_capacity(PIPELINE_DEPTH);
 
+        // Transport errors (send/receive) propagate as-is via `?`: they are
+        // almost certainly a disconnect, so no more packets will arrive and
+        // draining is impossible. A protocol error (bad data from the firmware)
+        // instead drains the still in-flight responses first, so they don't
+        // desync the next call.
         while next_send_address < end_address || !in_flight.is_empty() {
             while in_flight.len() < PIPELINE_DEPTH && next_send_address < end_address {
                 let to_read = std::cmp::min(
@@ -78,26 +135,15 @@ impl MemoryBackend {
                 .await?;
             in_flight.pop_front();
 
-            let pk_data = pk.get_data();
-            if pk_data.len() < 6 {
-                return Err(Error::MemoryError("Malformed memory read response".into()));
-            }
-            let status = pk_data[5];
-            if status != 0 {
-                return Err(Error::MemoryError(format!(
-                    "Memory read returned error status ({}) @ {}", status, chunk_address
-                )));
-            }
-            let read_data = &pk_data[6..];
-            if read_data.len() != to_read {
-                return Err(Error::MemoryError(format!(
-                    "Unexpected memory read response length @ {}: expected {} bytes, got {}",
-                    chunk_address, to_read, read_data.len()
-                )));
-            }
+            let read_data = match parse_read_response(pk.get_data(), to_read, chunk_address) {
+                Ok(read_data) => read_data,
+                Err(e) => {
+                    drain_in_flight(&self.read_downlink, in_flight.len()).await;
+                    return Err(e);
+                }
+            };
             let start = chunk_address - address;
-            let end = start + read_data.len();
-            data[start..end].copy_from_slice(read_data);
+            data[start..start + read_data.len()].copy_from_slice(read_data);
 
             if let Some(ref mut callback) = progress_callback {
                 let confirmed_end = in_flight
@@ -151,16 +197,9 @@ impl MemoryBackend {
                 .await?;
             in_flight.pop_front();
 
-            let pk_data = pk.get_data();
-            if pk_data.len() < 6 {
-                return Err(Error::MemoryError("Malformed memory write response".into()));
-            }
-            let status = pk_data[5];
-            if status != 0 {
-                return Err(Error::MemoryError(format!(
-                    "Memory write returned error status ({}) @ {}",
-                    status, chunk_address
-                )));
+            if let Err(e) = parse_write_response(pk.get_data(), chunk_address) {
+                drain_in_flight(&self.write_downlink, in_flight.len()).await;
+                return Err(e);
             }
 
             if let Some(ref mut callback) = progress_callback {
