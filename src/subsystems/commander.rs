@@ -45,6 +45,7 @@ const GENERIC_SETPOINT_CHANNEL: u8 = 0;
 const GENERIC_CMD_CHANNEL: u8 = 1;
 
 // Setpoint type identifiers
+const TYPE_FULL_STATE: u8 = 6;
 const TYPE_POSITION: u8 = 7;
 const TYPE_VELOCITY_WORLD: u8 = 8;
 const TYPE_ZDISTANCE: u8 = 9;
@@ -115,6 +116,38 @@ impl Commander {
 /// and in libs like this one. So if you have a use-case not covered by any of the existing setpoint
 /// do not hesitate to implement and contribute your dream setpoint :-).
 impl Commander {
+    /// Sends a full-state setpoint in world coordinates.
+    ///
+    /// # Arguments
+    /// * `position` - Target position [x, y, z] in meters
+    /// * `velocity` - Target velocity [vx, vy, vz] in meters/second
+    /// * `acceleration` - Target acceleration [ax, ay, az] in meters/second^2
+    /// * `orientation` - Target orientation quaternion [qx, qy, qz, qw]
+    /// * `rollrate` - Target roll rate in radians/second
+    /// * `pitchrate` - Target pitch rate in radians/second
+    /// * `yawrate` - Target yaw rate in radians/second
+    pub async fn setpoint_full_state(
+        &self,
+        position: [f32; 3],
+        velocity: [f32; 3],
+        acceleration: [f32; 3],
+        orientation: [f32; 4],
+        rollrate: f32,
+        pitchrate: f32,
+        yawrate: f32,
+    ) -> Result<()> {
+        let payload = encode_full_state_setpoint(
+            position,
+            velocity,
+            acceleration,
+            orientation,
+            [rollrate, pitchrate, yawrate],
+        )?;
+        let pk = Packet::new(GENERIC_SETPOINT_PORT, GENERIC_SETPOINT_CHANNEL, payload);
+        self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
+        Ok(())
+    }
+
     /// Sends an absolute position setpoint in world coordinates, with yaw as an absolute orientation.
     ///
     /// # Arguments
@@ -253,4 +286,73 @@ impl Commander {
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }
+}
+
+fn encode_full_state_setpoint(
+    position: [f32; 3],
+    velocity: [f32; 3],
+    acceleration: [f32; 3],
+    orientation: [f32; 4],
+    angular_velocity: [f32; 3],
+) -> Result<Vec<u8>> {
+    let mut payload = Vec::with_capacity(29);
+    payload.push(TYPE_FULL_STATE);
+
+    for value in position.into_iter().chain(velocity).chain(acceleration) {
+        payload.extend_from_slice(&scale_to_i16(value)?.to_le_bytes());
+    }
+
+    payload.extend_from_slice(&compress_quaternion(orientation)?.to_le_bytes());
+
+    for value in angular_velocity {
+        payload.extend_from_slice(&scale_to_i16(value)?.to_le_bytes());
+    }
+
+    Ok(payload)
+}
+
+fn scale_to_i16(value: f32) -> Result<i16> {
+    let scaled = value * 1000.0;
+    if !scaled.is_finite() || scaled < i16::MIN as f32 || scaled > i16::MAX as f32 {
+        return Err(Error::InvalidArgument(
+            "Full-state values must be finite and fit in a signed 16-bit value after scaling by 1000"
+                .to_owned(),
+        ));
+    }
+
+    Ok(scaled as i16)
+}
+
+fn compress_quaternion(quaternion: [f32; 4]) -> Result<u32> {
+    let norm_squared: f64 = quaternion
+        .iter()
+        .map(|component| f64::from(*component).powi(2))
+        .sum();
+    if !norm_squared.is_finite() || norm_squared == 0.0 {
+        return Err(Error::InvalidArgument(
+            "Orientation must be a finite, non-zero quaternion".to_owned(),
+        ));
+    }
+
+    let norm = norm_squared.sqrt();
+    let normalized = quaternion.map(|component| f64::from(component) / norm);
+    let mut largest_index = 0;
+    for index in 1..normalized.len() {
+        if normalized[index].abs() > normalized[largest_index].abs() {
+            largest_index = index;
+        }
+    }
+    let negate = normalized[largest_index] < 0.0;
+
+    let mut compressed = largest_index as u32;
+    for (index, component) in normalized.into_iter().enumerate() {
+        if index != largest_index {
+            let negative_bit = (component < 0.0) ^ negate;
+            let magnitude = (511.0 * component.abs() / std::f64::consts::FRAC_1_SQRT_2 + 0.5)
+                as u32;
+            compressed = (compressed << 10) | ((negative_bit as u32) << 9) | magnitude;
+        }
+    }
+
+    Ok(compressed)
 }
