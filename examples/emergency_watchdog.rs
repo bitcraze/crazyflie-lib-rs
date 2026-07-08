@@ -14,9 +14,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?);
 
-    println!("Connected! Demonstrating emergency watchdog...");
+    println!("Crazyflie connected!");
 
-    // TODO: show how to check if supervisor has already locked (in log field)
+    let info = crazyflie.supervisor.read_bitfield().await?;
+    if info.is_locked() {
+    println!("Crazyflie is locked - reboot required before running this demo.");
+    return Ok(());
+    }
+
+    println!("Demonstrating emergency watchdog...");
+
 
     // Arm, unlock, start motors
     crazyflie.supervisor.send_arming_request(true).await?;
