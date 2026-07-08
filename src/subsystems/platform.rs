@@ -177,7 +177,7 @@ impl Platform {
     /// # Arguments
     /// * `do_arm` - true to arm, false to disarm
     ///
-    #[deprecated(since = "0.5.1", note = "Use [`Supervisor::send_arming_request`](crate::subsystems::supervisor::Supervisor::send_arming_request) instead")]
+    #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_arming_request`](crate::subsystems::supervisor::Supervisor::send_arming_request) instead")]
     pub async fn send_arming_request(&self, do_arm: bool) -> Result<()> {
         // Route to supervisor port for compatibility
         let command = if do_arm { 1u8 } else { 0u8 };
@@ -195,7 +195,7 @@ impl Platform {
     ///
     /// Requests recovery from a crash state detected by the Crazyflie.
     ///
-    #[deprecated(since = "0.5.1", note = "Use [`Supervisor::send_crash_recovery_request`](crate::subsystems::supervisor::Supervisor::send_crash_recovery_request) instead")]
+    #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_crash_recovery_request`](crate::subsystems::supervisor::Supervisor::send_crash_recovery_request) instead")]
     pub async fn send_crash_recovery_request(&self) -> Result<()> {
         // Route to supervisor port for compatibility
         self.uplink

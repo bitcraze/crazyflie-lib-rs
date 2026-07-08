@@ -226,7 +226,7 @@ pub struct EmergencyControl {
 impl EmergencyControl {
     /// Send emergency stop command
     ///
-    #[deprecated(since = "0.5.1", note = "Use [`Supervisor::send_emergency_stop`](crate::subsystems::supervisor::Supervisor::send_emergency_stop) instead")]
+    #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_emergency_stop`](crate::subsystems::supervisor::Supervisor::send_emergency_stop) instead")]
     pub async fn send_emergency_stop(&self) -> Result<()> {
         let mut payload = Vec::with_capacity(1);
         payload.push(EMERGENCY_STOP);
@@ -237,7 +237,7 @@ impl EmergencyControl {
 
     /// Send emergency stop watchdog
     ///
-    #[deprecated(since = "0.5.1", note = "Use [`Supervisor::send_emergency_stop_watchdog`](crate::subsystems::supervisor::Supervisor::send_emergency_stop_watchdog) instead")]
+    #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_emergency_stop_watchdog`](crate::subsystems::supervisor::Supervisor::send_emergency_stop_watchdog) instead")]
     pub async fn send_emergency_stop_watchdog(&self) -> Result<()> {
         let mut payload = Vec::with_capacity(1);
         payload.push(EMERGENCY_STOP_WATCHDOG);
