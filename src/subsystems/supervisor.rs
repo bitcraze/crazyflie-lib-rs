@@ -44,7 +44,7 @@
 //! The emergency stop functionality allows immediate motor shutdown for safety. Two variants
 //! are available. The immediate stop cuts all motors at once and locks the firmware until reboot.
 //! The watchdog variant is softer: it arms a timer in the firmware that stops the motors if the
-//! message is not refreshed within 1000 ms, //! allowing controlled failsafe behaviour in a
+//! message is not refreshed within 1000 ms, allowing controlled failsafe behaviour in a
 //! communication-loss scenario:
 //! ```no_run
 //! # async fn emergency(crazyflie: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
@@ -68,12 +68,12 @@ use tokio::time::{timeout, Duration};
 
 // Channels
 const SUPERVISOR_CH_INFO: u8 = 0;
-const SUPERVISOR_CH_COMMAND: u8 = 1;
+pub(crate) const SUPERVISOR_CH_COMMAND: u8 = 1;
 
 // Commands
 const CMD_GET_STATE_BITFIELD: u8 = 0x0C;
-const CMD_ARM_SYSTEM: u8 = 0x01;
-const CMD_RECOVER_SYSTEM: u8 = 0x02;
+pub(crate) const CMD_ARM_SYSTEM: u8 = 0x01;
+pub(crate) const CMD_RECOVER_SYSTEM: u8 = 0x02;
 const CMD_EMERGENCY_STOP: u8 = 0x03;
 const CMD_EMERGENCY_STOP_WATCHDOG: u8 = 0x04;
 

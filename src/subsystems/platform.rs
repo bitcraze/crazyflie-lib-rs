@@ -12,6 +12,7 @@ use flume::{Receiver, Sender};
 use futures::{lock::Mutex, stream, Sink, SinkExt, Stream, StreamExt};
 
 use crate::crazyflie::PLATFORM_PORT;
+use crate::subsystems::supervisor::{CMD_ARM_SYSTEM, CMD_RECOVER_SYSTEM, SUPERVISOR_CH_COMMAND};
 
 const PLATFORM_COMMAND: u8 = 0;
 const VERSION_CHANNEL: u8 = 1;
@@ -183,8 +184,8 @@ impl Platform {
         self.uplink
             .send_async(Packet::new(
                 crate::crazyflie::SUPERVISOR_PORT,
-                1, // SUPERVISOR_CH_COMMAND
-                vec![0x01, command], // CMD_ARM_SYSTEM
+                SUPERVISOR_CH_COMMAND,
+                vec![CMD_ARM_SYSTEM, command],
             ))
             .await?;
         Ok(())
@@ -200,8 +201,8 @@ impl Platform {
         self.uplink
             .send_async(Packet::new(
                 crate::crazyflie::SUPERVISOR_PORT,
-                1, // SUPERVISOR_CH_COMMAND
-                vec![0x02], // CMD_RECOVER_SYSTEM
+                SUPERVISOR_CH_COMMAND,
+                vec![CMD_RECOVER_SYSTEM],
             ))
             .await?;
         Ok(())
