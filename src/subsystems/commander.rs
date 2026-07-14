@@ -119,29 +119,25 @@ impl Commander {
     /// Sends a full-state setpoint in world coordinates.
     ///
     /// # Arguments
-    /// * `position` - Target position [x, y, z] in meters
-    /// * `velocity` - Target velocity [vx, vy, vz] in meters/second
-    /// * `acceleration` - Target acceleration [ax, ay, az] in meters/second^2
-    /// * `orientation` - Target orientation quaternion [qx, qy, qz, qw]
-    /// * `rollrate` - Target roll rate in radians/second
-    /// * `pitchrate` - Target pitch rate in radians/second
-    /// * `yawrate` - Target yaw rate in radians/second
+    /// * `position` - Target position [x, y, z] (meters, world frame)
+    /// * `velocity` - Target velocity [vx, vy, vz] (meters/second, world frame)
+    /// * `acceleration` - Target acceleration [ax, ay, az] (meters/second^2, world frame)
+    /// * `orientation` - Target orientation quaternion [qx, qy, qz, qw] (unitless, world frame)
+    /// * `angular_velocity` - Target angular velocity [ωx, ωy, ωz] (radians/second, body frame)
     pub async fn setpoint_full_state(
         &self,
         position: [f32; 3],
         velocity: [f32; 3],
         acceleration: [f32; 3],
         orientation: [f32; 4],
-        rollrate: f32,
-        pitchrate: f32,
-        yawrate: f32,
+        angular_velocity: [f32; 3],
     ) -> Result<()> {
         let payload = encode_full_state_setpoint(
             position,
             velocity,
             acceleration,
             orientation,
-            [rollrate, pitchrate, yawrate],
+            angular_velocity,
         )?;
         let pk = Packet::new(GENERIC_SETPOINT_PORT, GENERIC_SETPOINT_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
