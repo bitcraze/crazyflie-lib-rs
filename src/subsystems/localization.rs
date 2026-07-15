@@ -227,6 +227,8 @@ pub struct EmergencyControl {
 impl EmergencyControl {
     /// Send emergency stop command
     ///
+    /// Immediately stops all motors and puts the Crazyflie into a locked state.
+    /// The drone will require a reboot before it can fly again.
     #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_emergency_stop`](crate::subsystems::supervisor::Supervisor::send_emergency_stop) instead")]
     pub async fn send_emergency_stop(&self) -> Result<()> {
         // Route to supervisor port for compatibility
@@ -237,6 +239,10 @@ impl EmergencyControl {
 
     /// Send emergency stop watchdog
     ///
+    /// Activates/resets a watchdog failsafe that will automatically emergency stop
+    /// the drone if this message isn't sent every 1000ms. Once activated by the first
+    /// call, you must continue sending this periodically forever or the drone will
+    /// automatically emergency stop. Use only if you need automatic failsafe behavior.
     #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_emergency_stop_watchdog`](crate::subsystems::supervisor::Supervisor::send_emergency_stop_watchdog) instead")]
     pub async fn send_emergency_stop_watchdog(&self) -> Result<()> {
         // Route to supervisor port for compatibility
