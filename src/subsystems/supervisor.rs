@@ -231,6 +231,14 @@ impl Supervisor {
             }
         }
 
+        // Hold the downlink lock across the whole request/reply exchange so
+        // concurrent callers cannot interleave requests and replies.
+        let downlink = self.info_downlink.lock().await;
+
+        // Discard stale replies from previously timed-out requests, so they
+        // cannot be mistaken for the answer to the request we are about to send.
+        while downlink.try_recv().is_ok() {}
+
         // Send request
         let pk = Packet::new(
             SUPERVISOR_PORT,
@@ -239,7 +247,8 @@ impl Supervisor {
         );
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
 
-        let bitfield = self.wait_for_bitfield().await?;
+        let bitfield = Self::wait_for_bitfield(&downlink).await?;
+        drop(downlink);
 
         let mut cached = self.cached_bitfield.lock().unwrap();
         *cached = Some((Instant::now(), bitfield));
@@ -247,8 +256,7 @@ impl Supervisor {
         Ok(SupervisorInfo::from_bits(bitfield))
     }
 
-    async fn wait_for_bitfield(&self) -> Result<u16> {
-        let downlink = self.info_downlink.lock().await;
+    async fn wait_for_bitfield(downlink: &Receiver<Packet>) -> Result<u16> {
         loop {
             let packet = timeout(Duration::from_millis(1000), downlink.recv_async())
                 .await
