@@ -77,6 +77,10 @@ pub(crate) const CMD_RECOVER_SYSTEM: u8 = 0x02;
 pub(crate) const CMD_EMERGENCY_STOP: u8 = 0x03;
 pub(crate) const CMD_EMERGENCY_STOP_WATCHDOG: u8 = 0x04;
 
+/// Reply flag, ORed into the echoed command byte of every supervisor
+/// response by the firmware (`CMD_RESPONSE` in crtp_supervisor.h).
+const CMD_RESPONSE: u8 = 0x80;
+
 // Bit positions
 const BIT_CAN_BE_ARMED: u8 = 0;
 const BIT_IS_ARMED: u8 = 1;
@@ -272,7 +276,7 @@ impl Supervisor {
             }
 
             let cmd = data[0];
-            if cmd != CMD_GET_STATE_BITFIELD && cmd != (CMD_GET_STATE_BITFIELD | 0x80) {
+            if cmd != CMD_GET_STATE_BITFIELD && cmd != (CMD_GET_STATE_BITFIELD | CMD_RESPONSE) {
                 continue;
             }
 
