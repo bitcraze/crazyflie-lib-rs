@@ -228,16 +228,8 @@ impl Supervisor {
     /// # }
     /// ```
     pub async fn read_bitfield(&self) -> Result<SupervisorInfo> {
-        // Block scope ensures the MutexGuard is dropped before any .await,
-        // keeping the future Send.
-        {
-            let cached = self.cached_bitfield.lock().unwrap();
-
-            if let Some((fetched_at, bitfield)) = *cached
-                && fetched_at.elapsed() < self.cache_timeout
-            {
-                return Ok(SupervisorInfo::from_bits(bitfield));
-            }
+        if let Some(info) = self.cached_info() {
+            return Ok(info);
         }
 
         // Hold the downlink lock across the whole request/reply exchange so
@@ -246,14 +238,8 @@ impl Supervisor {
 
         // Re-check the cache: a concurrent caller may have refreshed it while
         // we waited for the lock, in which case no request needs to be sent.
-        {
-            let cached = self.cached_bitfield.lock().unwrap();
-
-            if let Some((fetched_at, bitfield)) = *cached
-                && fetched_at.elapsed() < self.cache_timeout
-            {
-                return Ok(SupervisorInfo::from_bits(bitfield));
-            }
+        if let Some(info) = self.cached_info() {
+            return Ok(info);
         }
 
         // Discard stale replies from previously timed-out requests, so they
@@ -275,6 +261,19 @@ impl Supervisor {
         *cached = Some((Instant::now(), bitfield));
 
         Ok(SupervisorInfo::from_bits(bitfield))
+    }
+
+    /// Return the cached bitfield if it is still fresh. The MutexGuard never
+    /// crosses an .await, keeping `read_bitfield`'s future Send.
+    fn cached_info(&self) -> Option<SupervisorInfo> {
+        let cached = self.cached_bitfield.lock().unwrap();
+
+        if let Some((fetched_at, bitfield)) = *cached
+            && fetched_at.elapsed() < self.cache_timeout
+        {
+            return Some(SupervisorInfo::from_bits(bitfield));
+        }
+        None
     }
 
     async fn wait_for_bitfield(downlink: &Receiver<Packet>) -> Result<u16> {
