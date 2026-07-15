@@ -244,6 +244,18 @@ impl Supervisor {
         // concurrent callers cannot interleave requests and replies.
         let downlink = self.info_downlink.lock().await;
 
+        // Re-check the cache: a concurrent caller may have refreshed it while
+        // we waited for the lock, in which case no request needs to be sent.
+        {
+            let cached = self.cached_bitfield.lock().unwrap();
+
+            if let Some((fetched_at, bitfield)) = *cached
+                && fetched_at.elapsed() < self.cache_timeout
+            {
+                return Ok(SupervisorInfo::from_bits(bitfield));
+            }
+        }
+
         // Discard stale replies from previously timed-out requests, so they
         // cannot be mistaken for the answer to the request we are about to send.
         while downlink.try_recv().is_ok() {}
