@@ -212,7 +212,7 @@ impl Supervisor {
     /// Read the supervisor bitfield
     ///
     /// Requests the current supervisor bitfield from the Crazyflie and returns it decoded.
-    /// Uses time-based caching to avoid sending packages too frequently.
+    /// Uses time-based caching to avoid sending packets too frequently.
     ///
     /// # Example
     /// ```no_run
