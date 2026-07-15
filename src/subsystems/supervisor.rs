@@ -74,8 +74,8 @@ pub(crate) const SUPERVISOR_CH_COMMAND: u8 = 1;
 const CMD_GET_STATE_BITFIELD: u8 = 0x0C;
 pub(crate) const CMD_ARM_SYSTEM: u8 = 0x01;
 pub(crate) const CMD_RECOVER_SYSTEM: u8 = 0x02;
-const CMD_EMERGENCY_STOP: u8 = 0x03;
-const CMD_EMERGENCY_STOP_WATCHDOG: u8 = 0x04;
+pub(crate) const CMD_EMERGENCY_STOP: u8 = 0x03;
+pub(crate) const CMD_EMERGENCY_STOP_WATCHDOG: u8 = 0x04;
 
 // Bit positions
 const BIT_CAN_BE_ARMED: u8 = 0;

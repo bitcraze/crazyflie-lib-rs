@@ -61,7 +61,10 @@ use half::f16;
 
 use crate::{Error, Result};
 
-use crate::crazyflie::LOCALIZATION_PORT;
+use crate::crazyflie::{LOCALIZATION_PORT, SUPERVISOR_PORT};
+use crate::subsystems::supervisor::{
+    CMD_EMERGENCY_STOP, CMD_EMERGENCY_STOP_WATCHDOG, SUPERVISOR_CH_COMMAND,
+};
 
 // Channels
 const POSITION_CHANNEL: u8 = 0;
@@ -71,8 +74,8 @@ const GENERIC_CHANNEL: u8 = 1;
 const _RANGE_STREAM_REPORT: u8 = 0;
 const _RANGE_STREAM_REPORT_FP16: u8 = 1;
 const LPS_SHORT_LPP_PACKET: u8 = 2;
-const EMERGENCY_STOP: u8 = 3;
-const EMERGENCY_STOP_WATCHDOG: u8 = 4;
+const _EMERGENCY_STOP: u8 = 3;
+const _EMERGENCY_STOP_WATCHDOG: u8 = 4;
 const _COMM_GNSS_NMEA: u8 = 6;
 const _COMM_GNSS_PROPRIETARY: u8 = 7;
 const EXT_POSE: u8 = 8;
@@ -228,9 +231,8 @@ impl EmergencyControl {
     ///
     #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_emergency_stop`](crate::subsystems::supervisor::Supervisor::send_emergency_stop) instead")]
     pub async fn send_emergency_stop(&self) -> Result<()> {
-        let mut payload = Vec::with_capacity(1);
-        payload.push(EMERGENCY_STOP);
-        let pk = Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, payload);
+        // Route to supervisor port for compatibility
+        let pk = Packet::new(SUPERVISOR_PORT, SUPERVISOR_CH_COMMAND, vec![CMD_EMERGENCY_STOP]);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }
@@ -239,9 +241,12 @@ impl EmergencyControl {
     ///
     #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_emergency_stop_watchdog`](crate::subsystems::supervisor::Supervisor::send_emergency_stop_watchdog) instead")]
     pub async fn send_emergency_stop_watchdog(&self) -> Result<()> {
-        let mut payload = Vec::with_capacity(1);
-        payload.push(EMERGENCY_STOP_WATCHDOG);
-        let pk = Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, payload);
+        // Route to supervisor port for compatibility
+        let pk = Packet::new(
+            SUPERVISOR_PORT,
+            SUPERVISOR_CH_COMMAND,
+            vec![CMD_EMERGENCY_STOP_WATCHDOG],
+        );
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }
