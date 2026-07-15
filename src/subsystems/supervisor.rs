@@ -81,6 +81,11 @@ pub(crate) const CMD_EMERGENCY_STOP_WATCHDOG: u8 = 0x04;
 /// response by the firmware (`CMD_RESPONSE` in crtp_supervisor.h).
 const CMD_RESPONSE: u8 = 0x80;
 
+/// How long a fetched state bitfield stays fresh. Reads within this window
+/// are served from cache, capping request traffic on the CRTP link at
+/// ~10 packets/s no matter how fast the application polls.
+const BITFIELD_CACHE_TIMEOUT: Duration = Duration::from_millis(100);
+
 // Bit positions
 const BIT_CAN_BE_ARMED: u8 = 0;
 const BIT_IS_ARMED: u8 = 1;
@@ -204,7 +209,7 @@ impl Supervisor {
         Self {
             uplink,
             info_downlink: Mutex::new(info_downlink),
-            cache_timeout: Duration::from_millis(100),
+            cache_timeout: BITFIELD_CACHE_TIMEOUT,
             cached_bitfield: std::sync::Mutex::new(None),
         }
     }
