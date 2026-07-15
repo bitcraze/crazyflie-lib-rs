@@ -63,7 +63,7 @@ use crate::crazyflie::SUPERVISOR_PORT;
 use crazyflie_link::Packet;
 use flume::{Receiver, Sender};
 use futures::lock::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 use tokio::time::{timeout, Duration};
 
 // Channels
@@ -190,9 +190,8 @@ impl SupervisorInfo {
 pub struct Supervisor {
     uplink: Sender<Packet>,
     info_downlink: Mutex<Receiver<Packet>>,
-    cache_timeout_ms: u64,
-    last_fetch_time: std::sync::Mutex<u64>,
-    cached_bitfield: std::sync::Mutex<Option<u16>>,
+    cache_timeout: Duration,
+    cached_bitfield: std::sync::Mutex<Option<(Instant, u16)>>,
 }
 
 impl Supervisor {
@@ -201,8 +200,7 @@ impl Supervisor {
         Self {
             uplink,
             info_downlink: Mutex::new(info_downlink),
-            cache_timeout_ms: 100,
-            last_fetch_time: std::sync::Mutex::new(0),
+            cache_timeout: Duration::from_millis(100),
             cached_bitfield: std::sync::Mutex::new(None),
         }
     }
@@ -221,16 +219,13 @@ impl Supervisor {
     /// # }
     /// ```
     pub async fn read_bitfield(&self) -> Result<SupervisorInfo> {
-        let now = Self::current_time_ms();
-
-        // Block scope ensures the MutexGuards are dropped before any .await,
+        // Block scope ensures the MutexGuard is dropped before any .await,
         // keeping the future Send.
         {
-            let last_fetch = self.last_fetch_time.lock().unwrap();
             let cached = self.cached_bitfield.lock().unwrap();
 
-            if let Some(bitfield) = *cached
-                && now - *last_fetch < self.cache_timeout_ms
+            if let Some((fetched_at, bitfield)) = *cached
+                && fetched_at.elapsed() < self.cache_timeout
             {
                 return Ok(SupervisorInfo::from_bits(bitfield));
             }
@@ -246,10 +241,8 @@ impl Supervisor {
 
         let bitfield = self.wait_for_bitfield().await?;
 
-        let mut last_fetch = self.last_fetch_time.lock().unwrap();
         let mut cached = self.cached_bitfield.lock().unwrap();
-        *last_fetch = now;
-        *cached = Some(bitfield);
+        *cached = Some((Instant::now(), bitfield));
 
         Ok(SupervisorInfo::from_bits(bitfield))
     }
@@ -278,13 +271,6 @@ impl Supervisor {
             let bitfield = u16::from_le_bytes([data[1], data[2]]);
             return Ok(bitfield);
         }
-    }
-
-    fn current_time_ms() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
     }
 
     /// Send system arm/disarm request
