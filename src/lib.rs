@@ -21,6 +21,7 @@
 //! | Memory | Partial |
 //! | Param | Full(V2) |
 //! | Platform | Full |
+//! | Supervisor | Full (info and command channels) |
 //!
 //! ## Compatibility
 //!
@@ -92,7 +93,7 @@ pub use crate::crtp_utils::NoTocCache;
 /// Minimum supported protocol version
 ///
 /// see [the crate documentation](crate#compatibility) for more information.
-pub const MIN_SUPPORTED_PROTOCOL_VERSION: u8 = 11;
+pub const MIN_SUPPORTED_PROTOCOL_VERSION: u8 = 12;
 
 /// Maximum supported protocol version
 ///

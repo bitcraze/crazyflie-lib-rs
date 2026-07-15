@@ -1,19 +1,8 @@
 //! # Localization subsystem
 //!
 //! This subsystem provides access to the Crazyflie's localization services including
-//! emergency stop controls, external position/pose streaming, lighthouse positioning
+//! external position/pose streaming, lighthouse positioning
 //! system data, and Loco Positioning System (UWB) communication.
-//!
-//! ## Emergency Stop
-//!
-//! The emergency stop functionality allows immediate motor shutdown for safety:
-//! ```no_run
-//! # async fn emergency(crazyflie: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
-//! // Immediately stop all motors
-//! crazyflie.localization.emergency.send_emergency_stop().await?;
-//! # Ok(())
-//! # }
-//! ```
 //!
 //! ## External Position and Pose
 //!
@@ -72,7 +61,10 @@ use half::f16;
 
 use crate::{Error, Result};
 
-use crate::crazyflie::LOCALIZATION_PORT;
+use crate::crazyflie::{LOCALIZATION_PORT, SUPERVISOR_PORT};
+use crate::subsystems::supervisor::{
+    CMD_EMERGENCY_STOP, CMD_EMERGENCY_STOP_WATCHDOG, SUPERVISOR_CH_COMMAND,
+};
 
 // Channels
 const POSITION_CHANNEL: u8 = 0;
@@ -82,8 +74,8 @@ const GENERIC_CHANNEL: u8 = 1;
 const _RANGE_STREAM_REPORT: u8 = 0;
 const _RANGE_STREAM_REPORT_FP16: u8 = 1;
 const LPS_SHORT_LPP_PACKET: u8 = 2;
-const EMERGENCY_STOP: u8 = 3;
-const EMERGENCY_STOP_WATCHDOG: u8 = 4;
+const _EMERGENCY_STOP: u8 = 3;
+const _EMERGENCY_STOP_WATCHDOG: u8 = 4;
 const _COMM_GNSS_NMEA: u8 = 6;
 const _COMM_GNSS_PROPRIETARY: u8 = 7;
 const EXT_POSE: u8 = 8;
@@ -152,11 +144,9 @@ impl Localization {
                             let _ = angle_broadcast.broadcast(angle_data).await;
                         }
                     }
-                    LH_PERSIST_DATA => {
-                        if !data.is_empty() {
-                            let success = data[0] != 0;
-                            let _ = persist_broadcast.broadcast(success).await;
-                        }
+                    LH_PERSIST_DATA if !data.is_empty() => {
+                        let success = data[0] != 0;
+                        let _ = persist_broadcast.broadcast(success).await;
                     }
                     _ => {} // Ignore unknown packet types
                 }
@@ -239,10 +229,10 @@ impl EmergencyControl {
     ///
     /// Immediately stops all motors and puts the Crazyflie into a locked state.
     /// The drone will require a reboot before it can fly again.
+    #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_emergency_stop`](crate::subsystems::supervisor::Supervisor::send_emergency_stop) instead")]
     pub async fn send_emergency_stop(&self) -> Result<()> {
-        let mut payload = Vec::with_capacity(1);
-        payload.push(EMERGENCY_STOP);
-        let pk = Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, payload);
+        // Route to supervisor port for compatibility
+        let pk = Packet::new(SUPERVISOR_PORT, SUPERVISOR_CH_COMMAND, vec![CMD_EMERGENCY_STOP]);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }
@@ -253,10 +243,14 @@ impl EmergencyControl {
     /// the drone if this message isn't sent every 1000ms. Once activated by the first
     /// call, you must continue sending this periodically forever or the drone will
     /// automatically emergency stop. Use only if you need automatic failsafe behavior.
+    #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_emergency_stop_watchdog`](crate::subsystems::supervisor::Supervisor::send_emergency_stop_watchdog) instead")]
     pub async fn send_emergency_stop_watchdog(&self) -> Result<()> {
-        let mut payload = Vec::with_capacity(1);
-        payload.push(EMERGENCY_STOP_WATCHDOG);
-        let pk = Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, payload);
+        // Route to supervisor port for compatibility
+        let pk = Packet::new(
+            SUPERVISOR_PORT,
+            SUPERVISOR_CH_COMMAND,
+            vec![CMD_EMERGENCY_STOP_WATCHDOG],
+        );
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
     }

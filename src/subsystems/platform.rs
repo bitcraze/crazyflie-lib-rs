@@ -12,14 +12,13 @@ use flume::{Receiver, Sender};
 use futures::{lock::Mutex, stream, Sink, SinkExt, Stream, StreamExt};
 
 use crate::crazyflie::PLATFORM_PORT;
+use crate::subsystems::supervisor::{CMD_ARM_SYSTEM, CMD_RECOVER_SYSTEM, SUPERVISOR_CH_COMMAND};
 
 const PLATFORM_COMMAND: u8 = 0;
 const VERSION_CHANNEL: u8 = 1;
 const APP_CHANNEL: u8 = 2;
 
 const PLATFORM_SET_CONT_WAVE: u8 = 0;
-const PLATFORM_REQUEST_ARMING: u8 = 1;
-const PLATFORM_REQUEST_CRASH_RECOVERY: u8 = 2;
 
 const VERSION_GET_PROTOCOL: u8 = 0;
 const VERSION_GET_FIRMWARE: u8 = 1;
@@ -177,13 +176,15 @@ impl Platform {
     ///
     /// # Arguments
     /// * `do_arm` - true to arm, false to disarm
+    #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_arming_request`](crate::subsystems::supervisor::Supervisor::send_arming_request) instead")]
     pub async fn send_arming_request(&self, do_arm: bool) -> Result<()> {
-        let command = if do_arm { 1 } else { 0 };
+        // Route to supervisor port for compatibility
+        let command = if do_arm { 1u8 } else { 0u8 };
         self.uplink
             .send_async(Packet::new(
-                PLATFORM_PORT,
-                PLATFORM_COMMAND,
-                vec![PLATFORM_REQUEST_ARMING, command],
+                crate::crazyflie::SUPERVISOR_PORT,
+                SUPERVISOR_CH_COMMAND,
+                vec![CMD_ARM_SYSTEM, command],
             ))
             .await?;
         Ok(())
@@ -192,12 +193,14 @@ impl Platform {
     /// Send crash recovery request
     ///
     /// Requests recovery from a crash state detected by the Crazyflie.
+    #[deprecated(since = "0.8.1", note = "Use [`Supervisor::send_crash_recovery_request`](crate::subsystems::supervisor::Supervisor::send_crash_recovery_request) instead")]
     pub async fn send_crash_recovery_request(&self) -> Result<()> {
+        // Route to supervisor port for compatibility
         self.uplink
             .send_async(Packet::new(
-                PLATFORM_PORT,
-                PLATFORM_COMMAND,
-                vec![PLATFORM_REQUEST_CRASH_RECOVERY],
+                crate::crazyflie::SUPERVISOR_PORT,
+                SUPERVISOR_CH_COMMAND,
+                vec![CMD_RECOVER_SYSTEM],
             ))
             .await?;
         Ok(())
