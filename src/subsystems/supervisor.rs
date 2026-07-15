@@ -229,10 +229,10 @@ impl Supervisor {
             let last_fetch = self.last_fetch_time.lock().unwrap();
             let cached = self.cached_bitfield.lock().unwrap();
 
-            if let Some(bitfield) = *cached {
-                if now - *last_fetch < self.cache_timeout_ms {
-                    return Ok(SupervisorInfo::from_bits(bitfield));
-                }
+            if let Some(bitfield) = *cached
+                && now - *last_fetch < self.cache_timeout_ms
+            {
+                return Ok(SupervisorInfo::from_bits(bitfield));
             }
         }
 

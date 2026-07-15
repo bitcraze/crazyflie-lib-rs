@@ -144,11 +144,9 @@ impl Localization {
                             let _ = angle_broadcast.broadcast(angle_data).await;
                         }
                     }
-                    LH_PERSIST_DATA => {
-                        if !data.is_empty() {
-                            let success = data[0] != 0;
-                            let _ = persist_broadcast.broadcast(success).await;
-                        }
+                    LH_PERSIST_DATA if !data.is_empty() => {
+                        let success = data[0] != 0;
+                        let _ = persist_broadcast.broadcast(success).await;
                     }
                     _ => {} // Ignore unknown packet types
                 }
