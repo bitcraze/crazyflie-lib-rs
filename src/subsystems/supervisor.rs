@@ -266,10 +266,6 @@ impl Supervisor {
                 .await
                 .map_err(|_| Error::Timeout)??;
 
-            if packet.get_port() != SUPERVISOR_PORT || packet.get_channel() != SUPERVISOR_CH_INFO {
-                continue;
-            }
-
             let data = packet.get_data();
             if data.len() < 3 {
                 continue;
