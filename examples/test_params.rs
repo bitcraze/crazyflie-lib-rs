@@ -1,5 +1,5 @@
 use crazyflie_lib::Crazyflie;
-use crazyflie_link::LinkContext;
+use crazyflie_lib::crazyflie_link::LinkContext;
 use futures::StreamExt;
 
 #[tokio::main]

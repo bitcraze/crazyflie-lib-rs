@@ -9,7 +9,7 @@
 /// library doesn't currently have access to. Users must manually sleep for the expected duration.
 
 
-use crazyflie_link::LinkContext;
+use crazyflie_lib::crazyflie_link::LinkContext;
 use crazyflie_lib::Crazyflie;
 use tokio::time::{sleep, Duration};
 

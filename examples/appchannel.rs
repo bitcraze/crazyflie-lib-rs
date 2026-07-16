@@ -19,7 +19,7 @@ use futures::{SinkExt, StreamExt};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let link_context = crazyflie_link::LinkContext::new();
+    let link_context = crazyflie_lib::crazyflie_link::LinkContext::new();
 
     // Scan for Crazyflies on the default address
     println!("Scanning for Crazyflie.");

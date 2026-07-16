@@ -5,7 +5,7 @@ const URI: &str = "radio://0/80/2M/E7E7E7E7E7";
 // Example that cycles through colors on the Crazyflie LED ring
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let link_context = crazyflie_link::LinkContext::new();
+    let link_context = crazyflie_lib::crazyflie_link::LinkContext::new();
     let cf = crazyflie_lib::Crazyflie::connect_from_uri(&link_context, URI, crazyflie_lib::NoTocCache).await?;
 
     // Switch to the virtual memory effect so the LED ring reads from LED driver memory

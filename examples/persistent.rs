@@ -1,6 +1,6 @@
 /// Persistent parameters example
 use crazyflie_lib::{Crazyflie, NoTocCache};
-use crazyflie_link::LinkContext;
+use crazyflie_lib::crazyflie_link::LinkContext;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -1,6 +1,6 @@
 use std::time::Duration;
 use tokio::time::sleep;
-use crazyflie_link::LinkContext;
+use crazyflie_lib::crazyflie_link::LinkContext;
 use crazyflie_lib::Crazyflie;
 
 // Example demonstrating how to read the Crazyflie's state through the supervisor.

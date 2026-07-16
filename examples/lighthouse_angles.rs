@@ -11,7 +11,7 @@
 /// - Base station calibration data already received by the Crazyflie
 
 use crazyflie_lib::Crazyflie;
-use crazyflie_link::LinkContext;
+use crazyflie_lib::crazyflie_link::LinkContext;
 use futures::StreamExt;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};

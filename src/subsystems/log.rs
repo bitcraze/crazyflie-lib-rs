@@ -8,7 +8,7 @@
 //!
 //! ```no_run
 //! # use crazyflie_lib::{Crazyflie, Value, Error, subsystems::log::LogPeriod};
-//! # use crazyflie_link::LinkContext;
+//! # use crazyflie_lib::crazyflie_link::LinkContext;
 //! # async fn example() -> Result<(), Error> {
 //! # let context = LinkContext::new();
 //! # let cf = Crazyflie::connect_from_uri(

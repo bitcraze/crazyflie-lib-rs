@@ -1,5 +1,5 @@
 use crazyflie_lib::{subsystems::log::LogPeriod, Crazyflie};
-use crazyflie_link::LinkContext;
+use crazyflie_lib::crazyflie_link::LinkContext;
 use std::convert::TryInto;
 use tokio::time::{Duration, sleep};
 
