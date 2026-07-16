@@ -31,6 +31,7 @@ The following subsystems are or need to be implemented:
    - [ ] DeckPaa3905
  - [x] Param subsystem
  - [x] Platform services
+ - [x] Supervisor subsystem
 
 The [python Crazyflie lib] implements a bunch of higher-level functionality like [swarm support] helpers. Those are out of scope of this crate and will need to be implemented in another specialized crate.
 
