@@ -301,7 +301,7 @@ impl Param {
     ///
     /// ```no_run
     /// # use crazyflie_lib::{Crazyflie, Value, Error};
-    /// # use crazyflie_link::LinkContext;
+    /// # use crazyflie_lib::crazyflie_link::LinkContext;
     /// # async fn example() -> Result<(), Error> {
     /// # let context = LinkContext::new();
     /// # let cf = Crazyflie::connect_from_uri(
@@ -380,7 +380,7 @@ impl Param {
     /// the return parameter. For example to get a u16 param:
     /// ```no_run
     /// # use crazyflie_lib::{Crazyflie, Value, Error};
-    /// # use crazyflie_link::LinkContext;
+    /// # use crazyflie_lib::crazyflie_link::LinkContext;
     /// # async fn example() -> Result<(), Error> {
     /// # let context = LinkContext::new();
     /// # let cf = Crazyflie::connect_from_uri(

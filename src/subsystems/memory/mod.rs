@@ -179,7 +179,7 @@ impl Memory {
     /// ```no_run
     /// use crazyflie_lib::subsystems::memory::MemoryType;
     /// use crazyflie_lib::{Crazyflie, Value, Error};
-    /// use crazyflie_link::LinkContext;
+    /// use crazyflie_lib::crazyflie_link::LinkContext;
     /// async fn example() -> Result<(), Error> {
     ///   let context = LinkContext::new();
     ///   let cf = Crazyflie::connect_from_uri(
@@ -196,7 +196,7 @@ impl Memory {
     /// ```no_run
     /// use crazyflie_lib::subsystems::memory::MemoryType;
     /// use crazyflie_lib::{Crazyflie, Value, Error};
-    /// use crazyflie_link::LinkContext;
+    /// use crazyflie_lib::crazyflie_link::LinkContext;
     /// async fn example() -> Result<(), Error> {
     ///   let context = LinkContext::new();
     ///   let cf = Crazyflie::connect_from_uri(
