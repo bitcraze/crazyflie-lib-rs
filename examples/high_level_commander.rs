@@ -13,7 +13,7 @@
 //! Note: High-level commander methods return immediately after sending the command,
 //! so manual sleeps are needed to wait for each movement to complete.
 
-use crazyflie_link::LinkContext;
+use crazyflie_lib::crazyflie_link::LinkContext;
 use crazyflie_lib::Crazyflie;
 use std::f32::consts::PI;
 use tokio::time::{sleep, Duration};

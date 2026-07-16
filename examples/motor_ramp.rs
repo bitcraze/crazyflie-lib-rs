@@ -1,6 +1,6 @@
 /// Simple example that ramps the motor thrust and then stops them
 use crazyflie_lib::Crazyflie;
-use crazyflie_link::LinkContext;
+use crazyflie_lib::crazyflie_link::LinkContext;
 use tokio::time::{Duration, sleep};
 
 #[tokio::main]

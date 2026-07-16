@@ -1,7 +1,7 @@
 /// Example demonstrating a simple in-memory TOC cache implementation
 /// and measuring connection times with and without TOC caching.
 use crazyflie_lib::{Crazyflie, TocCache};
-use crazyflie_link::LinkContext;
+use crazyflie_lib::crazyflie_link::LinkContext;
 use std::{collections::HashMap, sync::Arc, sync::RwLock};
 use tokio::time::{sleep, Duration};
 

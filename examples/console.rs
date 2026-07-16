@@ -4,7 +4,7 @@ use futures::StreamExt;
 // Example scans for Crazyflies, connect the first one and print the console message line by line.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let link_context = crazyflie_link::LinkContext::new();
+    let link_context = crazyflie_lib::crazyflie_link::LinkContext::new();
 
     // Scan for Crazyflies on the default address
     let found = link_context.scan([0xE7; 5]).await?;

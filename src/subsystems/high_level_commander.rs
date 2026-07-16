@@ -61,7 +61,7 @@ pub const TRAJECTORY_TYPE_POLY4D_COMPRESSED: u8 = 1;
 ///
 /// # Safe usage pattern
 /// ```no_run
-/// # use crazyflie_link::LinkContext;
+/// # use crazyflie_lib::crazyflie_link::LinkContext;
 /// # use crazyflie_lib::Crazyflie;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// # let context = LinkContext::new();
