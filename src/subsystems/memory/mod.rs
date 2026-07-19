@@ -223,7 +223,7 @@ impl Memory {
     /// # Arguments
     /// * `memory` - The MemoryDevice struct representing the memory to get
     /// # Returns
-    /// An Option containing a reference to the MemoryDevice struct if found, or None if not found
+    /// An Option containing a Result with the opened memory on success, or None if not found
     pub async fn open_memory<T: FromMemoryBackend>(&self, memory: MemoryDevice) -> Option<Result<T>> {
       let backend = self.backends.get(memory.memory_id as usize)?.lock().await.take()?;
       Some(T::from_memory_backend(backend).await)

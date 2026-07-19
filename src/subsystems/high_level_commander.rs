@@ -345,7 +345,7 @@ impl HighLevelCommander {
     /// * `trajectory_id` - Identifier used to reference this trajectory later.
     /// * `memory_offset` - Byte offset into trajectory memory where the data begins.
     /// * `piece_count` - Number of segments (pieces) in the trajectory.
-    /// * `trajectory_type` - Type of the trajectory data (e.g. Poly4D).
+    /// * `trajectory_type` - Type of the trajectory data (e.g. [`TRAJECTORY_TYPE_POLY4D`] or [`TRAJECTORY_TYPE_POLY4D_COMPRESSED`]).
     ///
     /// # Errors
     /// Returns [`Error::Disconnected`] if the command cannot be sent.
