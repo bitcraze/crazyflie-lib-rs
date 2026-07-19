@@ -204,8 +204,8 @@ enum ElementType {
     Constant = 0,
     /// Linear (1 coefficient)
     Linear = 1,
-    /// Quadratic (3 coefficients)
-    Quadratic = 2,
+    /// Cubic (3 coefficients)
+    Cubic = 2,
     /// Full (7 coefficients)
     Full = 3,
 }
@@ -215,7 +215,7 @@ impl ElementType {
         match len {
             0 => Some(ElementType::Constant),
             1 => Some(ElementType::Linear),
-            3 => Some(ElementType::Quadratic),
+            3 => Some(ElementType::Cubic),
             7 => Some(ElementType::Full),
             _ => None,
         }
