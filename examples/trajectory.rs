@@ -1,7 +1,7 @@
 //! Example: upload and run a predefined trajectory via the high-level commander.
 use crazyflie_lib::Crazyflie;
 use crazyflie_lib::subsystems::memory::{MemoryType, Poly, Poly4D, TrajectoryMemory};
-use crazyflie_link::LinkContext;
+use crazyflie_lib::crazyflie_link::LinkContext;
 use tokio::time::{Duration, sleep};
 
 const TRAJECTORY_ID: u8 = 1;

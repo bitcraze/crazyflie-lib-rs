@@ -127,7 +127,7 @@ impl Poly4D {
     ///
     /// # Arguments
     /// * `duration` - Length of the segment in **seconds**
-    /// * `x`, `y`, `z` - Position polynomials, in metres.
+    /// * `x`, `y`, `z` - Position polynomials, in meters.
     /// * `yaw` - Heading polynomial, in radians.
     pub fn new(duration: f32, x: Poly, y: Poly, z: Poly, yaw: Poly) -> Self {
         Self { duration, x, y, z, yaw }
@@ -224,8 +224,8 @@ impl ElementType {
 
 /// A segment in a compressed trajectory
 ///
-/// Compressed segments hold Bézier control points, it does not store the raw coefficients, but
-/// the control points of the Bézier curve.
+/// Compressed segments store the Bézier control points rather than
+/// the polynomial coefficients of the curve.
 /// Segments vectors can be either of constant (0), linear (1), cubic (3), or full (7) length.
 #[derive(Debug, Clone)]
 pub struct CompressedSegment {
