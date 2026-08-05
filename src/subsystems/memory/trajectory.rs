@@ -2,8 +2,46 @@
 //!
 //! This module provides types and functionality for defining and uploading
 //! trajectories to the Crazyflie's trajectory memory. Trajectories can be
-//! either uncompressed (using `Poly4D`) or compressed (using `CompressedStart`
-//! and `CompressedSegment`).
+//! either uncompressed (using `Poly4D`) or compressed (using `CompressedStart` and `CompressedSegment`).
+//!
+//! See the Crazyflie firmware documentation on
+//! [trajectory formats](https://www.bitcraze.io/documentation/repository/crazyflie-firmware/master/functional-areas/trajectory_formats/)
+//! for the format details.
+//!
+//! # Example
+//!
+//! Upload a trajectory and run it. Each `Poly4D` segment describes position over its `duration`
+//! (see [`Poly`]).
+//!
+//! ```no_run
+//! # use crazyflie_lib::Crazyflie;
+//! use crazyflie_lib::subsystems::memory::{MemoryType, Poly, Poly4D, TrajectoryMemory};
+//! # async fn run(cf: Crazyflie) -> Result<(), Box<dyn std::error::Error>> {
+//! // One segment: fly 1 m forward in x over 2 s at 0.5 m, no yaw.
+//! let segment = Poly4D::new(
+//!     2.0,
+//!     Poly::from_slice(&[0.0, 0.5]), // x: 0 -> 1
+//!     Poly::from_slice(&[]),         // y: 0
+//!     Poly::from_slice(&[0.5]),      // z: constant 0.5
+//!     Poly::from_slice(&[]),         // yaw: 0
+//! );
+//!
+//! // Open the trajectory memory and upload the segments.
+//! let device = cf
+//!     .memory
+//!     .get_memories(Some(MemoryType::Trajectory))
+//!     .pop()
+//!     .cloned()
+//!     .ok_or("no trajectory memory")?;
+//! let trajectory: TrajectoryMemory =
+//!     cf.memory.open_memory(device).await.ok_or("already open or missing")??;
+//! trajectory.write_uncompressed(&[segment], 0).await?;
+//!
+//! // Register it under an id the high-level commander can run.
+//! cf.high_level_commander.define_trajectory(1, 0, 1, None).await?;
+//! # Ok(())
+//! # }
+//! ```
 
 use crate::{Error, Result, subsystems::memory::{MemoryBackend, memory_types}};
 use memory_types::{FromMemoryBackend, MemoryType};
@@ -86,6 +124,11 @@ pub struct Poly4D {
 
 impl Poly4D {
     /// Create a new Poly4D trajectory segment
+    ///
+    /// # Arguments
+    /// * `duration` - Length of the segment in **seconds**
+    /// * `x`, `y`, `z` - Position polynomials, in meters.
+    /// * `yaw` - Heading polynomial, in radians.
     pub fn new(duration: f32, x: Poly, y: Poly, z: Poly, yaw: Poly) -> Self {
         Self { duration, x, y, z, yaw }
     }
@@ -161,8 +204,8 @@ enum ElementType {
     Constant = 0,
     /// Linear (1 coefficient)
     Linear = 1,
-    /// Quadratic (3 coefficients)
-    Quadratic = 2,
+    /// Cubic (3 coefficients)
+    Cubic = 2,
     /// Full (7 coefficients)
     Full = 3,
 }
@@ -172,7 +215,7 @@ impl ElementType {
         match len {
             0 => Some(ElementType::Constant),
             1 => Some(ElementType::Linear),
-            3 => Some(ElementType::Quadratic),
+            3 => Some(ElementType::Cubic),
             7 => Some(ElementType::Full),
             _ => None,
         }
@@ -181,9 +224,9 @@ impl ElementType {
 
 /// A segment in a compressed trajectory
 ///
-/// Compressed segments use variable-length encoding where each axis
-/// can have 0, 1, 3, or 7 coefficients depending on the complexity
-/// of motion along that axis.
+/// Compressed segments store the Bézier control points rather than
+/// the polynomial coefficients of the curve.
+/// Segments vectors can be either of constant (0), linear (1), cubic (3), or full (7) length.
 #[derive(Debug, Clone)]
 pub struct CompressedSegment {
     duration: f32,
@@ -406,5 +449,4 @@ impl TrajectoryMemory {
         self.memory.write(start_addr, &data, Some(progress_callback)).await?;
         Ok(data.len())
     }
-
 }
