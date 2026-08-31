@@ -56,6 +56,12 @@
 //! ## Sourced consoles
 //!
 //! Protocol version 13 adds an immutable catalog of additional Console sources.
+//! When connecting, the library first disables all sourced consoles and discards
+//! sourced packets preceding the successful disable response. This establishes a
+//! clean library-session boundary even though CRTP has no connection-scoped remote
+//! state. Sourced-console history therefore contains only data from sources enabled
+//! by this library after that boundary.
+//!
 //! Catalog discovery is lazy and cached, and transparently retries while the
 //! firmware reports that startup is not yet complete. Older protocol versions
 //! return an empty catalog, so callers can use the same discovery flow across
@@ -108,7 +114,7 @@ const CONTROL_SET_ENABLED: u8 = 0;
 const CATALOG_CHANNEL: u8 = 3;
 const CATALOG_GET_ITEM: u8 = 0;
 const CATALOG_GET_INFO: u8 = 1;
-const CATALOG_NOT_READY_RETRY_DELAY: Duration = Duration::from_millis(10);
+const NOT_READY_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 /// Identifier assigned to a sourced console for the current Crazyflie boot.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -508,6 +514,73 @@ struct ConsoleTransactionWorker {
     catalog: Option<ConsoleCatalog>,
 }
 
+enum SetEnabledResponse {
+    CommandError(u8),
+    Result(u8),
+}
+
+fn parse_set_enabled_response(response: &Packet, request: &[u8; 3]) -> Result<SetEnabledResponse> {
+    let data = response.get_data();
+    if data.len() == 2 && data[0] == CONTROL_SET_ENABLED {
+        return Ok(SetEnabledResponse::CommandError(data[1]));
+    }
+    if data.len() != 4 || data[..3] != request[..] {
+        return Err(Error::ProtocolError(
+            "Malformed sourced Console control response".to_owned(),
+        ));
+    }
+    Ok(SetEnabledResponse::Result(data[3]))
+}
+
+async fn set_enabled_raw(
+    uplink: &channel::Sender<Packet>,
+    control_downlink: &channel::Receiver<Packet>,
+    selector: ConsoleSourceSelector,
+    enabled: bool,
+) -> Result<SetEnabledResponse> {
+    let request = [CONTROL_SET_ENABLED, selector.wire_id(), u8::from(enabled)];
+    uplink
+        .send_async(Packet::new(CONSOLE_PORT, CONTROL_CHANNEL, request.to_vec()))
+        .await
+        .map_err(|_| Error::Disconnected)?;
+
+    let response = control_downlink
+        .recv_async()
+        .await
+        .map_err(|_| Error::Disconnected)?;
+    parse_set_enabled_response(&response, &request)
+}
+
+fn command_rejected(selector: ConsoleSourceSelector, enabled: bool, errno: u8) -> Error {
+    Error::Console(ConsoleError::CommandRejected {
+        selector,
+        enabled,
+        errno,
+    })
+}
+
+async fn initialize_sourced_console(
+    uplink: &channel::Sender<Packet>,
+    control_downlink: &channel::Receiver<Packet>,
+    protocol_version: u8,
+) -> Result<()> {
+    if protocol_version < SOURCED_CONSOLE_PROTOCOL_VERSION {
+        return Ok(());
+    }
+
+    loop {
+        match set_enabled_raw(uplink, control_downlink, ConsoleSourceSelector::All, false).await? {
+            SetEnabledResponse::Result(0) => return Ok(()),
+            SetEnabledResponse::Result(errno) if errno == libc::EAGAIN as u8 => {
+                tokio::time::sleep(NOT_READY_RETRY_DELAY).await;
+            }
+            SetEnabledResponse::CommandError(errno) | SetEnabledResponse::Result(errno) => {
+                return Err(command_rejected(ConsoleSourceSelector::All, false, errno));
+            }
+        }
+    }
+}
+
 impl ConsoleTransactionWorker {
     async fn run(mut self, commands: channel::Receiver<ConsoleCommand>) {
         while let Ok(command) = commands.recv_async().await {
@@ -562,7 +635,7 @@ impl ConsoleTransactionWorker {
             let data = info.get_data();
             if data.len() == 2 && data[0] == CATALOG_GET_INFO {
                 if data[1] == libc::EAGAIN as u8 {
-                    tokio::time::sleep(CATALOG_NOT_READY_RETRY_DELAY).await;
+                    tokio::time::sleep(NOT_READY_RETRY_DELAY).await;
                     continue;
                 }
                 return Err(Error::Console(ConsoleError::CatalogCommandRejected {
@@ -602,7 +675,7 @@ impl ConsoleTransactionWorker {
                 let data = item.get_data();
                 if data.len() == 2 && data[0] == CATALOG_GET_ITEM {
                     if data[1] == libc::EAGAIN as u8 {
-                        tokio::time::sleep(CATALOG_NOT_READY_RETRY_DELAY).await;
+                        tokio::time::sleep(NOT_READY_RETRY_DELAY).await;
                         continue;
                     }
                     return Err(Error::Console(ConsoleError::CatalogCommandRejected {
@@ -656,39 +729,38 @@ impl ConsoleTransactionWorker {
     }
 
     async fn set_enabled(&self, selector: ConsoleSourceSelector, enabled: bool) -> Result<()> {
-        let enabled_byte = u8::from(enabled);
-        let request = [CONTROL_SET_ENABLED, selector.wire_id(), enabled_byte];
-        self.uplink
-            .send_async(Packet::new(CONSOLE_PORT, CONTROL_CHANNEL, request.to_vec()))
-            .await
-            .map_err(|_| Error::Disconnected)?;
+        match set_enabled_raw(&self.uplink, &self.control_downlink, selector, enabled).await? {
+            SetEnabledResponse::Result(0) => Ok(()),
+            SetEnabledResponse::CommandError(errno) | SetEnabledResponse::Result(errno) => {
+                Err(command_rejected(selector, enabled, errno))
+            }
+        }
+    }
+}
 
-        let response = self
-            .control_downlink
-            .recv_async()
-            .await
-            .map_err(|_| Error::Disconnected)?;
-        let data = response.get_data();
-        if data.len() == 2 && data[0] == CONTROL_SET_ENABLED {
-            return Err(Error::Console(ConsoleError::CommandRejected {
-                selector,
-                enabled,
-                errno: data[1],
-            }));
+struct ConsoleConstructionGuard {
+    console_task: Option<JoinHandle<()>>,
+}
+
+impl ConsoleConstructionGuard {
+    fn new(console_task: JoinHandle<()>) -> Self {
+        Self {
+            console_task: Some(console_task),
         }
-        if data.len() != 4 || data[..3] != request {
-            return Err(Error::ProtocolError(
-                "Malformed sourced Console control response".to_owned(),
-            ));
+    }
+
+    fn disarm(mut self) -> JoinHandle<()> {
+        self.console_task
+            .take()
+            .expect("Console construction guard must own its task")
+    }
+}
+
+impl Drop for ConsoleConstructionGuard {
+    fn drop(&mut self) {
+        if let Some(task) = self.console_task.take() {
+            task.abort();
         }
-        if data[3] != 0 {
-            return Err(Error::Console(ConsoleError::CommandRejected {
-                selector,
-                enabled,
-                errno: data[3],
-            }));
-        }
-        Ok(())
     }
 }
 
@@ -782,6 +854,9 @@ impl Console {
             }
         });
 
+        let console_task_guard = ConsoleConstructionGuard::new(console_task);
+        initialize_sourced_console(&uplink, &control_downlink, protocol_version).await?;
+
         let (command_sender, command_receiver) = channel::unbounded();
         let transaction_task = tokio::spawn(
             ConsoleTransactionWorker {
@@ -794,6 +869,7 @@ impl Console {
             }
             .run(command_receiver),
         );
+        let console_task = console_task_guard.disarm();
 
         Ok(Self {
             stream_broadcast_receiver,
@@ -921,11 +997,276 @@ mod tests {
     use super::*;
     use futures::join;
 
+    async fn new_initialized_console(
+        downlink: channel::Receiver<Packet>,
+        uplink: channel::Sender<Packet>,
+        uplink_receiver: &channel::Receiver<Packet>,
+        downlink_sender: &channel::Sender<Packet>,
+    ) -> Console {
+        let firmware = async {
+            let request = uplink_receiver.recv_async().await.unwrap();
+            assert_eq!(request.get_channel(), CONTROL_CHANNEL);
+            assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, u8::MAX, 0]);
+            downlink_sender
+                .send_async(Packet::new(
+                    CONSOLE_PORT,
+                    CONTROL_CHANNEL,
+                    vec![CONTROL_SET_ENABLED, u8::MAX, 0, 0],
+                ))
+                .await
+                .unwrap();
+        };
+
+        let (console, ()) = join!(Console::new(downlink, uplink, 13), firmware);
+        console.unwrap()
+    }
+
+    async fn assert_router_stopped(downlink_sender: &channel::Sender<Packet>) {
+        tokio::time::timeout(Duration::from_millis(250), async {
+            while !downlink_sender.is_disconnected() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("Console router task was not stopped");
+    }
+
+    #[tokio::test]
+    async fn initialization_discards_inherited_source_packets() {
+        let (uplink, uplink_receiver) = channel::unbounded();
+        let (downlink_sender, downlink) = channel::unbounded();
+        let construction = Console::new(downlink, uplink, 13);
+        tokio::pin!(construction);
+
+        tokio::select! {
+            request = uplink_receiver.recv_async() => {
+                let request = request.unwrap();
+                assert_eq!(request.get_channel(), CONTROL_CHANNEL);
+                assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, u8::MAX, 0]);
+            }
+            _ = construction.as_mut() => {
+                panic!("Console construction returned before initialization");
+            }
+        }
+        assert!(
+            uplink_receiver.try_recv().is_err(),
+            "catalog discovery started before initialization completed"
+        );
+
+        for stale in [b"stale one".as_slice(), b"stale two".as_slice()] {
+            downlink_sender
+                .send_async(Packet::new(
+                    CONSOLE_PORT,
+                    1,
+                    [vec![0], stale.to_vec()].concat(),
+                ))
+                .await
+                .unwrap();
+        }
+        downlink_sender
+            .send_async(Packet::new(
+                CONSOLE_PORT,
+                CONTROL_CHANNEL,
+                vec![CONTROL_SET_ENABLED, u8::MAX, 0, 0],
+            ))
+            .await
+            .unwrap();
+        let console = construction.await.unwrap();
+
+        let discover = async {
+            assert_eq!(
+                uplink_receiver.recv_async().await.unwrap().get_data(),
+                &[CATALOG_GET_INFO]
+            );
+            downlink_sender
+                .send_async(Packet::new(
+                    CONSOLE_PORT,
+                    CATALOG_CHANNEL,
+                    vec![CATALOG_GET_INFO, 1, 0, 0, 0, 0],
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                uplink_receiver.recv_async().await.unwrap().get_data(),
+                &[CATALOG_GET_ITEM, 0]
+            );
+            downlink_sender
+                .send_async(Packet::new(
+                    CONSOLE_PORT,
+                    CATALOG_CHANNEL,
+                    [vec![CATALOG_GET_ITEM, 0], b"deck:bcCam".to_vec()].concat(),
+                ))
+                .await
+                .unwrap();
+        };
+        let (catalog, ()) = join!(console.catalog(), discover);
+        let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
+        let mut bytes = source.byte_stream(ConsoleHistory::Replay).await;
+
+        let enable = async {
+            let request = uplink_receiver.recv_async().await.unwrap();
+            assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, 0, 1]);
+            downlink_sender
+                .send_async(Packet::new(
+                    CONSOLE_PORT,
+                    CONTROL_CHANNEL,
+                    vec![CONTROL_SET_ENABLED, 0, 1, 0],
+                ))
+                .await
+                .unwrap();
+        };
+        let (enabled, ()) = join!(console.enable(source.selector()), enable);
+        enabled.unwrap();
+
+        downlink_sender
+            .send_async(Packet::new(
+                CONSOLE_PORT,
+                1,
+                [vec![0], b"fresh".to_vec()].concat(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(bytes.next().await.unwrap(), b"fresh");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), bytes.next())
+                .await
+                .is_err(),
+            "inherited sourced-console data entered the new session history"
+        );
+    }
+
+    #[tokio::test]
+    async fn initialization_retries_normal_eagain_response() {
+        let (uplink, uplink_receiver): (channel::Sender<Packet>, channel::Receiver<Packet>) =
+            channel::unbounded();
+        let (downlink_sender, downlink) = channel::unbounded();
+
+        let firmware = async {
+            for result in [libc::EAGAIN as u8, 0] {
+                let request = uplink_receiver.recv_async().await.unwrap();
+                assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, u8::MAX, 0]);
+                downlink_sender
+                    .send_async(Packet::new(
+                        CONSOLE_PORT,
+                        CONTROL_CHANNEL,
+                        vec![CONTROL_SET_ENABLED, u8::MAX, 0, result],
+                    ))
+                    .await
+                    .unwrap();
+            }
+        };
+
+        let console = tokio::time::timeout(Duration::from_millis(250), async {
+            let (console, ()) = join!(Console::new(downlink, uplink, 13), firmware);
+            console
+        })
+        .await
+        .expect("Console initialization did not retry EAGAIN")
+        .unwrap();
+        assert!(uplink_receiver.try_recv().is_err());
+        drop(console);
+    }
+
+    #[tokio::test]
+    async fn initialization_rejects_malformed_response_and_stops_router() {
+        let (uplink, uplink_receiver) = channel::unbounded();
+        let (downlink_sender, downlink) = channel::unbounded();
+
+        let firmware = async {
+            let _ = uplink_receiver.recv_async().await.unwrap();
+            downlink_sender
+                .send_async(Packet::new(
+                    CONSOLE_PORT,
+                    CONTROL_CHANNEL,
+                    vec![CONTROL_SET_ENABLED, 0, 0, 0],
+                ))
+                .await
+                .unwrap();
+        };
+        let (result, ()) = join!(Console::new(downlink, uplink, 13), firmware);
+        assert!(matches!(result, Err(Error::ProtocolError(_))));
+        assert_router_stopped(&downlink_sender).await;
+    }
+
+    #[tokio::test]
+    async fn initialization_surfaces_firmware_rejection_and_stops_router() {
+        let (uplink, uplink_receiver) = channel::unbounded();
+        let (downlink_sender, downlink) = channel::unbounded();
+
+        let firmware = async {
+            let _ = uplink_receiver.recv_async().await.unwrap();
+            downlink_sender
+                .send_async(Packet::new(
+                    CONSOLE_PORT,
+                    CONTROL_CHANNEL,
+                    vec![CONTROL_SET_ENABLED, u8::MAX, 0, libc::EIO as u8],
+                ))
+                .await
+                .unwrap();
+        };
+        let (result, ()) = join!(Console::new(downlink, uplink, 13), firmware);
+        assert!(matches!(
+            result,
+            Err(Error::Console(ConsoleError::CommandRejected {
+                selector: ConsoleSourceSelector::All,
+                enabled: false,
+                errno,
+            })) if errno == libc::EIO as u8
+        ));
+        assert_router_stopped(&downlink_sender).await;
+    }
+
+    #[tokio::test]
+    async fn initialization_reports_uplink_closure_and_stops_router() {
+        let (uplink, uplink_receiver) = channel::unbounded();
+        let (downlink_sender, downlink) = channel::unbounded();
+        drop(uplink_receiver);
+
+        let result = Console::new(downlink, uplink, 13).await;
+        assert!(matches!(result, Err(Error::Disconnected)));
+        assert_router_stopped(&downlink_sender).await;
+    }
+
+    #[tokio::test]
+    async fn initialization_reports_control_downlink_closure() {
+        let (uplink, _uplink_receiver) = channel::unbounded();
+        let (downlink_sender, downlink) = channel::unbounded();
+        drop(downlink_sender);
+
+        let result = Console::new(downlink, uplink, 13).await;
+        assert!(matches!(result, Err(Error::Disconnected)));
+    }
+
+    #[tokio::test]
+    async fn cancelling_initialization_stops_router() {
+        let (uplink, uplink_receiver) = channel::unbounded();
+        let (downlink_sender, downlink) = channel::unbounded();
+
+        {
+            let construction = Console::new(downlink, uplink, 13);
+            tokio::pin!(construction);
+            tokio::select! {
+                request = uplink_receiver.recv_async() => {
+                    assert_eq!(
+                        request.unwrap().get_data(),
+                        &[CONTROL_SET_ENABLED, u8::MAX, 0]
+                    );
+                }
+                _ = construction.as_mut() => {
+                    panic!("Console construction returned before initialization");
+                }
+            }
+        }
+
+        assert_router_stopped(&downlink_sender).await;
+    }
+
     #[tokio::test]
     async fn catalog_is_discovered_once_and_cached() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let firmware = async {
             let request = uplink_receiver.recv_async().await.unwrap();
@@ -972,7 +1313,8 @@ mod tests {
     async fn catalog_waits_and_retries_while_firmware_is_not_ready() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let firmware = async {
             let first = uplink_receiver.recv_async().await.unwrap();
@@ -1013,7 +1355,8 @@ mod tests {
     async fn catalog_retries_items_while_firmware_is_not_ready() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let firmware = async {
             let info = uplink_receiver.recv_async().await.unwrap();
@@ -1064,7 +1407,8 @@ mod tests {
     async fn cancelling_catalog_discovery_does_not_desynchronize_later_discovery() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         {
             let discovery = console.catalog();
@@ -1116,7 +1460,8 @@ mod tests {
     async fn catalog_rejects_a_path_with_an_empty_segment() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let firmware = async {
             assert_eq!(
@@ -1145,7 +1490,8 @@ mod tests {
     async fn catalog_rejects_duplicate_paths() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let firmware = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1174,7 +1520,8 @@ mod tests {
     async fn catalog_reports_command_error_responses() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let firmware = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1208,7 +1555,8 @@ mod tests {
     async fn enable_reports_the_firmware_errno() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             assert_eq!(uplink_receiver.recv_async().await.unwrap().get_data(), &[1]);
@@ -1271,7 +1619,8 @@ mod tests {
     async fn control_commands_are_serialized() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1323,7 +1672,8 @@ mod tests {
     async fn disable_waits_until_earlier_source_packets_are_processed() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let request = uplink_receiver.recv_async().await.unwrap();
@@ -1408,7 +1758,8 @@ mod tests {
     async fn cancelling_control_does_not_desynchronize_the_next_command() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1476,7 +1827,8 @@ mod tests {
     async fn control_rejects_unknown_sources_without_sending_a_packet() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1502,7 +1854,8 @@ mod tests {
     async fn malformed_control_responses_are_protocol_errors() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1538,7 +1891,8 @@ mod tests {
     async fn short_control_error_responses_preserve_the_errno() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1585,7 +1939,8 @@ mod tests {
     async fn byte_stream_replays_history_then_continues_live() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             assert_eq!(uplink_receiver.recv_async().await.unwrap().get_data(), &[1]);
@@ -1627,7 +1982,8 @@ mod tests {
     async fn text_stream_decodes_utf8_across_packets() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1666,7 +2022,8 @@ mod tests {
     async fn line_streams_assemble_multiple_lines_independently_per_source() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1713,7 +2070,8 @@ mod tests {
     async fn text_stream_flushes_incomplete_utf8_and_ends_on_disconnect() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1749,7 +2107,8 @@ mod tests {
     async fn shutdown_waits_for_source_streams_to_close() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1785,7 +2144,8 @@ mod tests {
     async fn text_stream_is_lossy_and_live_does_not_replay_history() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1825,7 +2185,8 @@ mod tests {
     async fn slow_byte_consumer_keeps_its_connection_history_cursor() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1862,7 +2223,8 @@ mod tests {
     async fn packets_from_unknown_source_ids_are_ignored() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 13).await.unwrap();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
 
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
