@@ -10,9 +10,6 @@ use std::collections::HashMap;
 
 const SIZE_FLOAT: usize = std::mem::size_of::<f32>();
 
-const MAX_NR_OF_ANCHORS: usize = 16;
-const ID_LIST_LEN: usize = 1 + MAX_NR_OF_ANCHORS;
-
 const ADR_ID_LIST: usize = 0x0000;
 const ADR_ACTIVE_ID_LIST: usize = 0x1000;
 const ADR_ANCHOR_BASE: usize = 0x2000;
@@ -71,46 +68,40 @@ impl LocoMemory2 {
         }
     }
 
+    /// Read an anchor id list page: a one byte count followed by that many ids.
+    async fn read_id_list_at(&self, base_address: usize) -> Result<Vec<u8>> {
+        let count = self.memory.read::<fn(usize, usize)>(base_address, 1, None).await?[0] as usize;
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+
+        // The count is included again in the second read: the list can shrink
+        // in between and the ids past the new count are zeroed, not anchor 0.
+        let page = self.memory.read::<fn(usize, usize)>(base_address, 1 + count, None).await?;
+        let valid = std::cmp::min(page[0] as usize, count);
+        Ok(page[1..1 + valid].to_vec())
+    }
+
     /// Read the list of configured anchor IDs
     ///
     /// Returns a vector of anchor IDs that are configured in the system.
     pub async fn read_id_list(&self) -> Result<Vec<u8>> {
-        let data = self.memory.read::<fn(usize, usize)>(ADR_ID_LIST, ID_LIST_LEN, None).await?;
-        let count = data[0] as usize;
-        if count > MAX_NR_OF_ANCHORS {
-            return Err(Error::MemoryError(format!(
-                "Anchor count {} exceeds maximum {}", count, MAX_NR_OF_ANCHORS
-            )));
-        }
-        Ok(data[1..1 + count].to_vec())
+        self.read_id_list_at(ADR_ID_LIST).await
     }
 
     /// Read the list of currently active anchor IDs
     ///
     /// Returns a vector of anchor IDs that are currently active.
     pub async fn read_active_id_list(&self) -> Result<Vec<u8>> {
-        let data = self.memory.read::<fn(usize, usize)>(ADR_ACTIVE_ID_LIST, ID_LIST_LEN, None).await?;
-        let count = data[0] as usize;
-        if count > MAX_NR_OF_ANCHORS {
-            return Err(Error::MemoryError(format!(
-                "Active anchor count {} exceeds maximum {}", count, MAX_NR_OF_ANCHORS
-            )));
-        }
-        Ok(data[1..1 + count].to_vec())
+        self.read_id_list_at(ADR_ACTIVE_ID_LIST).await
     }
 
     /// Read position data for a single anchor
     ///
     /// # Arguments
-    /// * `anchor_id` - The anchor ID (0-15, as stored in the ID list)
+    /// * `anchor_id` - The anchor ID as stored in the ID list. The firmware
+    ///   exposes one page per id, so any value is valid.
     pub async fn read_anchor_data(&self, anchor_id: u8) -> Result<LocoAnchorData> {
-        if anchor_id as usize >= MAX_NR_OF_ANCHORS {
-            return Err(Error::MemoryError(format!(
-                "Anchor ID {} out of range (0-{})",
-                anchor_id,
-                MAX_NR_OF_ANCHORS - 1
-            )));
-        }
         let addr = ADR_ANCHOR_BASE + ANCHOR_PAGE_SIZE * anchor_id as usize;
         let data = self.memory.read::<fn(usize, usize)>(addr, ANCHOR_DATA_LEN, None).await?;
         LocoAnchorData::from_bytes(&data)
