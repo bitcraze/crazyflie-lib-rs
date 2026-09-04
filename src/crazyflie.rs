@@ -227,7 +227,7 @@ impl Crazyflie {
 
         let commander = Commander::new(uplink.clone());
         let high_level_commander = HighLevelCommander::new(uplink.clone());
-        let console = Console::new(console_downlink).await?;
+        let console = Console::new(console_downlink, uplink.clone(), protocol_version).await?;
         let localization = Localization::new(uplink.clone(), localization_downlink);
         let link_service = LinkService::new(uplink.clone(), link_downlink, link.clone());
         let supervisor = Supervisor::new(uplink.clone(), supervisor_downlink);
@@ -274,6 +274,7 @@ impl Crazyflie {
         if let Some(dispatch_task) = self.dispatch_task.lock().await.take() {
             dispatch_task.await.expect("Dispatcher task failed");
         }
+        self.console.shutdown().await;
 
         self.link.close().await;
     }
