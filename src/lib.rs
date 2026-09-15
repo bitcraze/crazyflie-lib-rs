@@ -99,6 +99,7 @@
 mod crazyflie;
 mod crtp_utils;
 mod error;
+mod firmware_errno;
 mod value;
 
 pub mod subsystems;
