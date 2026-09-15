@@ -573,7 +573,7 @@ impl Param {
         // Check if this is an error response (exactly 4 bytes)
         if data.len() == 4 {
             let error_code = data[3];
-            if error_code == libc::ENOENT as u8 {
+            if error_code == crate::firmware_errno::ENOENT {
                 // Parameter ID invalid OR parameter doesn't have PARAM_EXTENDED flag
                 return Err(Error::ParamError(format!(
                     "Parameter '{}' does not have extended type info (not marked as PARAM_EXTENDED in firmware)",
@@ -665,7 +665,7 @@ impl Param {
         // Check if this is an error response (exactly 4 bytes)
         if data.len() == 4 {
             let error_code = data[3];
-            if error_code == libc::ENOENT as u8 {
+            if error_code == crate::firmware_errno::ENOENT {
                 // Parameter ID invalid OR parameter is read-only
                 // (read-only params have no default value concept in firmware)
                 // Cache the unsupported state so we don't query again
@@ -896,7 +896,7 @@ impl Param {
 
         match status {
             0x00 => Ok(()),
-            x if x == libc::ENOENT as u8 => {
+            x if x == crate::firmware_errno::ENOENT => {
                 // Storage operation failed (couldn't write to persistent storage)
                 // or parameter ID invalid (shouldn't happen since we verified the ID)
                 Err(Error::ParamError(format!(
@@ -969,7 +969,7 @@ impl Param {
 
         match status {
             0x00 => Ok(()),
-            x if x == libc::ENOENT as u8 => {
+            x if x == crate::firmware_errno::ENOENT => {
                 // Storage delete failed (couldn't delete from persistent storage)
                 // or parameter ID invalid (shouldn't happen since we verified the ID)
                 Err(Error::ParamError(format!(

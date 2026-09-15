@@ -505,12 +505,20 @@ enum ConsoleCommand {
     Shutdown,
 }
 
+// Registration and router closure must be serialized: a source registered
+// after EOF would otherwise never be closed.
+#[derive(Default)]
+struct ConsoleSourceRegistry {
+    states: BTreeMap<u8, Arc<ConsoleSourceState>>,
+    closed: bool,
+}
+
 struct ConsoleTransactionWorker {
     uplink: channel::Sender<Packet>,
     control_downlink: channel::Receiver<Packet>,
     catalog_downlink: channel::Receiver<Packet>,
     protocol_version: u8,
-    source_states: Arc<Mutex<BTreeMap<u8, Arc<ConsoleSourceState>>>>,
+    source_states: Arc<Mutex<ConsoleSourceRegistry>>,
     catalog: Option<ConsoleCatalog>,
 }
 
@@ -571,7 +579,7 @@ async fn initialize_sourced_console(
     loop {
         match set_enabled_raw(uplink, control_downlink, ConsoleSourceSelector::All, false).await? {
             SetEnabledResponse::Result(0) => return Ok(()),
-            SetEnabledResponse::Result(errno) if errno == libc::EAGAIN as u8 => {
+            SetEnabledResponse::Result(errno) if errno == crate::firmware_errno::EAGAIN => {
                 tokio::time::sleep(NOT_READY_RETRY_DELAY).await;
             }
             SetEnabledResponse::CommandError(errno) | SetEnabledResponse::Result(errno) => {
@@ -634,7 +642,7 @@ impl ConsoleTransactionWorker {
                 .map_err(|_| Error::Disconnected)?;
             let data = info.get_data();
             if data.len() == 2 && data[0] == CATALOG_GET_INFO {
-                if data[1] == libc::EAGAIN as u8 {
+                if data[1] == crate::firmware_errno::EAGAIN {
                     tokio::time::sleep(NOT_READY_RETRY_DELAY).await;
                     continue;
                 }
@@ -674,7 +682,7 @@ impl ConsoleTransactionWorker {
                     .map_err(|_| Error::Disconnected)?;
                 let data = item.get_data();
                 if data.len() == 2 && data[0] == CATALOG_GET_ITEM {
-                    if data[1] == libc::EAGAIN as u8 {
+                    if data[1] == crate::firmware_errno::EAGAIN {
                         tokio::time::sleep(NOT_READY_RETRY_DELAY).await;
                         continue;
                     }
@@ -716,9 +724,14 @@ impl ConsoleTransactionWorker {
         }
 
         {
-            let mut states = self.source_states.lock().await;
+            let mut registry = self.source_states.lock().await;
+            if registry.closed {
+                return Err(Error::Disconnected);
+            }
             for source in &sources {
-                states.insert(source.id.get(), source.state.clone());
+                registry
+                    .states
+                    .insert(source.id.get(), source.state.clone());
             }
         }
 
@@ -797,7 +810,7 @@ impl Console {
 
         let buffer = console_buffer.clone();
         let lines = console_lines.clone();
-        let source_states: Arc<Mutex<BTreeMap<u8, Arc<ConsoleSourceState>>>> = Default::default();
+        let source_states: Arc<Mutex<ConsoleSourceRegistry>> = Default::default();
         let routed_source_states = source_states.clone();
 
         // Keep every port-0 packet in its original receive order. In particular,
@@ -828,7 +841,12 @@ impl Console {
                         let Some((&source_id, bytes)) = data.split_first() else {
                             continue;
                         };
-                        let state = routed_source_states.lock().await.get(&source_id).cloned();
+                        let state = routed_source_states
+                            .lock()
+                            .await
+                            .states
+                            .get(&source_id)
+                            .cloned();
                         if let Some(state) = state {
                             state.push_bytes(bytes).await;
                         }
@@ -843,12 +861,11 @@ impl Console {
                 }
             }
 
-            let states: Vec<_> = routed_source_states
-                .lock()
-                .await
-                .values()
-                .cloned()
-                .collect();
+            let states: Vec<_> = {
+                let mut registry = routed_source_states.lock().await;
+                registry.closed = true;
+                registry.states.values().cloned().collect()
+            };
             for state in states {
                 state.close().await;
             }
@@ -1142,7 +1159,7 @@ mod tests {
         let (downlink_sender, downlink) = channel::unbounded();
 
         let firmware = async {
-            for result in [libc::EAGAIN as u8, 0] {
+            for result in [11, 0] {
                 let request = uplink_receiver.recv_async().await.unwrap();
                 assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, u8::MAX, 0]);
                 downlink_sender
@@ -1199,7 +1216,7 @@ mod tests {
                 .send_async(Packet::new(
                     CONSOLE_PORT,
                     CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, u8::MAX, 0, libc::EIO as u8],
+                    vec![CONTROL_SET_ENABLED, u8::MAX, 0, 5],
                 ))
                 .await
                 .unwrap();
@@ -1211,7 +1228,7 @@ mod tests {
                 selector: ConsoleSourceSelector::All,
                 enabled: false,
                 errno,
-            })) if errno == libc::EIO as u8
+            })) if errno == 5
         ));
         assert_router_stopped(&downlink_sender).await;
     }
@@ -1320,11 +1337,7 @@ mod tests {
             let first = uplink_receiver.recv_async().await.unwrap();
             assert_eq!(first.get_data(), &[CATALOG_GET_INFO]);
             downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CATALOG_CHANNEL,
-                    vec![CATALOG_GET_INFO, libc::EAGAIN as u8],
-                ))
+                .send_async(Packet::new(0, CATALOG_CHANNEL, vec![CATALOG_GET_INFO, 11]))
                 .await
                 .unwrap();
 
@@ -1373,11 +1386,7 @@ mod tests {
             let first_item = uplink_receiver.recv_async().await.unwrap();
             assert_eq!(first_item.get_data(), &[CATALOG_GET_ITEM, 0]);
             downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CATALOG_CHANNEL,
-                    vec![CATALOG_GET_ITEM, libc::EAGAIN as u8],
-                ))
+                .send_async(Packet::new(0, CATALOG_CHANNEL, vec![CATALOG_GET_ITEM, 11]))
                 .await
                 .unwrap();
 
@@ -1532,11 +1541,7 @@ mod tests {
             let item = uplink_receiver.recv_async().await.unwrap();
             assert_eq!(item.get_data(), &[CATALOG_GET_ITEM, 0]);
             downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CATALOG_CHANNEL,
-                    vec![CATALOG_GET_ITEM, libc::ENOENT as u8],
-                ))
+                .send_async(Packet::new(0, CATALOG_CHANNEL, vec![CATALOG_GET_ITEM, 2]))
                 .await
                 .unwrap();
         };
@@ -1547,7 +1552,7 @@ mod tests {
             Err(Error::Console(ConsoleError::CatalogCommandRejected {
                 operation: ConsoleCatalogOperation::GetItem(id),
                 errno,
-            })) if id.get() == 0 && errno == libc::ENOENT as u8
+            })) if id.get() == 0 && errno == 2
         ));
     }
 
@@ -1585,7 +1590,7 @@ mod tests {
             assert_eq!(request.get_channel(), 2);
             assert_eq!(request.get_data(), &[0, 0, 1]);
             downlink_sender
-                .send_async(Packet::new(0, 2, vec![0, 0, 1, libc::EIO as u8]))
+                .send_async(Packet::new(0, 2, vec![0, 0, 1, 5]))
                 .await
                 .unwrap();
         };
@@ -1597,7 +1602,7 @@ mod tests {
                 selector: ConsoleSourceSelector::Source(id),
                 enabled: true,
                 errno,
-            })) if id == source.id() && errno == libc::EIO as u8
+            })) if id == source.id() && errno == 5
         ));
     }
 
@@ -1919,7 +1924,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, libc::EINVAL as u8],
+                    vec![CONTROL_SET_ENABLED, 22],
                 ))
                 .await
                 .unwrap();
@@ -1931,7 +1936,7 @@ mod tests {
                 selector: rejected,
                 enabled: true,
                 errno,
-            })) if rejected == selector && errno == libc::EINVAL as u8
+            })) if rejected == selector && errno == 22
         ));
     }
 
@@ -2129,13 +2134,21 @@ mod tests {
         let (catalog, ()) = join!(console.catalog(), discover);
         let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
         let mut bytes = source.byte_stream(ConsoleHistory::Live).await;
+        let mut text = source.text_stream(ConsoleHistory::Live).await;
+        let mut lines = source.line_stream(ConsoleHistory::Live).await;
 
         drop(downlink_sender);
         tokio::time::timeout(Duration::from_secs(1), console.shutdown())
             .await
             .expect("Console shutdown did not join its router task");
 
-        assert_eq!(bytes.next().await, None);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            assert_eq!(bytes.next().await, None);
+            assert_eq!(text.next().await, None);
+            assert_eq!(lines.next().await, None);
+        })
+        .await
+        .expect("source streams did not close after shutdown");
         assert!(console.console_task.lock().await.is_none());
         assert!(console.transaction_task.lock().await.is_none());
     }
@@ -2269,5 +2282,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(legacy.next().await.unwrap(), "legacy");
+    }
+
+    // The current-thread runtime routes the queued final reply and EOF before
+    // waking the transaction worker to register the discovered sources.
+    #[tokio::test]
+    async fn disconnect_during_final_catalog_response_rejects_discovery() {
+        let (uplink, uplink_receiver) = channel::unbounded();
+        let (downlink_sender, downlink) = channel::unbounded();
+        let console =
+            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
+        let firmware = async move {
+            let _ = uplink_receiver.recv_async().await.unwrap();
+            downlink_sender
+                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .await
+                .unwrap();
+            let _ = uplink_receiver.recv_async().await.unwrap();
+            downlink_sender
+                .send_async(Packet::new(
+                    0,
+                    3,
+                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                ))
+                .await
+                .unwrap();
+            drop(downlink_sender);
+        };
+        let (catalog, ()) = join!(console.catalog(), firmware);
+        assert!(matches!(catalog, Err(Error::Disconnected)));
+        console.shutdown().await;
     }
 }
