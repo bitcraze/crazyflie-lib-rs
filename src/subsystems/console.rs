@@ -524,20 +524,24 @@ struct ConsoleTransactionWorker {
 
 enum SetEnabledResponse {
     CommandError(u8),
-    Result(u8),
+    Success,
 }
 
 fn parse_set_enabled_response(response: &Packet, request: &[u8; 3]) -> Result<SetEnabledResponse> {
     let data = response.get_data();
-    if data.len() == 2 && data[0] == CONTROL_SET_ENABLED {
+    if data.len() == 2 && data[0] == CONTROL_SET_ENABLED && data[1] != 0 {
         return Ok(SetEnabledResponse::CommandError(data[1]));
     }
-    if data.len() != 4 || data[..3] != request[..] {
+    if data.len() != 4
+        || data[0] != CONTROL_SET_ENABLED
+        || data[1] != 0
+        || data[2..] != request[1..]
+    {
         return Err(Error::ProtocolError(
             "Malformed sourced Console control response".to_owned(),
         ));
     }
-    Ok(SetEnabledResponse::Result(data[3]))
+    Ok(SetEnabledResponse::Success)
 }
 
 async fn set_enabled_raw(
@@ -578,11 +582,11 @@ async fn initialize_sourced_console(
 
     loop {
         match set_enabled_raw(uplink, control_downlink, ConsoleSourceSelector::All, false).await? {
-            SetEnabledResponse::Result(0) => return Ok(()),
-            SetEnabledResponse::Result(errno) if errno == crate::firmware_errno::EAGAIN => {
+            SetEnabledResponse::Success => return Ok(()),
+            SetEnabledResponse::CommandError(errno) if errno == crate::firmware_errno::EAGAIN => {
                 tokio::time::sleep(NOT_READY_RETRY_DELAY).await;
             }
-            SetEnabledResponse::CommandError(errno) | SetEnabledResponse::Result(errno) => {
+            SetEnabledResponse::CommandError(errno) => {
                 return Err(command_rejected(ConsoleSourceSelector::All, false, errno));
             }
         }
@@ -641,7 +645,7 @@ impl ConsoleTransactionWorker {
                 .await
                 .map_err(|_| Error::Disconnected)?;
             let data = info.get_data();
-            if data.len() == 2 && data[0] == CATALOG_GET_INFO {
+            if data.len() == 2 && data[0] == CATALOG_GET_INFO && data[1] != 0 {
                 if data[1] == crate::firmware_errno::EAGAIN {
                     tokio::time::sleep(NOT_READY_RETRY_DELAY).await;
                     continue;
@@ -654,14 +658,14 @@ impl ConsoleTransactionWorker {
             break info;
         };
         let data = info.get_data();
-        if data.len() != 6 || data[0] != CATALOG_GET_INFO {
+        if data.len() != 7 || data[0] != CATALOG_GET_INFO || data[1] != 0 {
             return Err(Error::ProtocolError(
                 "Malformed sourced Console catalog info response".to_owned(),
             ));
         }
 
-        let source_count = data[1];
-        let crc32 = u32::from_le_bytes(data[2..6].try_into()?);
+        let source_count = data[2];
+        let crc32 = u32::from_le_bytes(data[3..7].try_into()?);
         let mut sources = Vec::with_capacity(source_count.into());
 
         for id in 0..source_count {
@@ -681,7 +685,7 @@ impl ConsoleTransactionWorker {
                     .await
                     .map_err(|_| Error::Disconnected)?;
                 let data = item.get_data();
-                if data.len() == 2 && data[0] == CATALOG_GET_ITEM {
+                if data.len() == 2 && data[0] == CATALOG_GET_ITEM && data[1] != 0 {
                     if data[1] == crate::firmware_errno::EAGAIN {
                         tokio::time::sleep(NOT_READY_RETRY_DELAY).await;
                         continue;
@@ -694,13 +698,13 @@ impl ConsoleTransactionWorker {
                 break item;
             };
             let data = item.get_data();
-            if data.len() < 3 || data[0] != CATALOG_GET_ITEM || data[1] != id {
+            if data.len() < 4 || data[0] != CATALOG_GET_ITEM || data[1] != 0 || data[2] != id {
                 return Err(Error::ProtocolError(
                     "Malformed sourced Console catalog item response".to_owned(),
                 ));
             }
 
-            let path = std::str::from_utf8(&data[2..]).map_err(|_| {
+            let path = std::str::from_utf8(&data[3..]).map_err(|_| {
                 Error::ProtocolError("Sourced Console catalog path is not valid UTF-8".to_owned())
             })?;
             if path.split(':').any(str::is_empty) {
@@ -743,8 +747,8 @@ impl ConsoleTransactionWorker {
 
     async fn set_enabled(&self, selector: ConsoleSourceSelector, enabled: bool) -> Result<()> {
         match set_enabled_raw(&self.uplink, &self.control_downlink, selector, enabled).await? {
-            SetEnabledResponse::Result(0) => Ok(()),
-            SetEnabledResponse::CommandError(errno) | SetEnabledResponse::Result(errno) => {
+            SetEnabledResponse::Success => Ok(()),
+            SetEnabledResponse::CommandError(errno) => {
                 Err(command_rejected(selector, enabled, errno))
             }
         }
@@ -1028,7 +1032,7 @@ mod tests {
                 .send_async(Packet::new(
                     CONSOLE_PORT,
                     CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, u8::MAX, 0, 0],
+                    vec![CONTROL_SET_ENABLED, 0, u8::MAX, 0],
                 ))
                 .await
                 .unwrap();
@@ -1084,7 +1088,7 @@ mod tests {
             .send_async(Packet::new(
                 CONSOLE_PORT,
                 CONTROL_CHANNEL,
-                vec![CONTROL_SET_ENABLED, u8::MAX, 0, 0],
+                vec![CONTROL_SET_ENABLED, 0, u8::MAX, 0],
             ))
             .await
             .unwrap();
@@ -1099,7 +1103,7 @@ mod tests {
                 .send_async(Packet::new(
                     CONSOLE_PORT,
                     CATALOG_CHANNEL,
-                    vec![CATALOG_GET_INFO, 1, 0, 0, 0, 0],
+                    vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0],
                 ))
                 .await
                 .unwrap();
@@ -1111,7 +1115,7 @@ mod tests {
                 .send_async(Packet::new(
                     CONSOLE_PORT,
                     CATALOG_CHANNEL,
-                    [vec![CATALOG_GET_ITEM, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![CATALOG_GET_ITEM, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -1127,7 +1131,7 @@ mod tests {
                 .send_async(Packet::new(
                     CONSOLE_PORT,
                     CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, 0, 1, 0],
+                    vec![CONTROL_SET_ENABLED, 0, 0, 1],
                 ))
                 .await
                 .unwrap();
@@ -1153,7 +1157,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn initialization_retries_normal_eagain_response() {
+    async fn initialization_retries_eagain_error_response() {
         let (uplink, uplink_receiver): (channel::Sender<Packet>, channel::Receiver<Packet>) =
             channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
@@ -1162,12 +1166,13 @@ mod tests {
             for result in [11, 0] {
                 let request = uplink_receiver.recv_async().await.unwrap();
                 assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, u8::MAX, 0]);
+                let response = if result == 0 {
+                    vec![CONTROL_SET_ENABLED, 0, u8::MAX, 0]
+                } else {
+                    vec![CONTROL_SET_ENABLED, result]
+                };
                 downlink_sender
-                    .send_async(Packet::new(
-                        CONSOLE_PORT,
-                        CONTROL_CHANNEL,
-                        vec![CONTROL_SET_ENABLED, u8::MAX, 0, result],
-                    ))
+                    .send_async(Packet::new(CONSOLE_PORT, CONTROL_CHANNEL, response))
                     .await
                     .unwrap();
             }
@@ -1216,7 +1221,7 @@ mod tests {
                 .send_async(Packet::new(
                     CONSOLE_PORT,
                     CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, u8::MAX, 0, 5],
+                    vec![CONTROL_SET_ENABLED, 5],
                 ))
                 .await
                 .unwrap();
@@ -1290,7 +1295,7 @@ mod tests {
             assert_eq!(request.get_channel(), 3);
             assert_eq!(request.get_data(), &[1]);
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 2, 0x78, 0x56, 0x34, 0x12]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 2, 0x78, 0x56, 0x34, 0x12]))
                 .await
                 .unwrap();
 
@@ -1299,7 +1304,7 @@ mod tests {
                 assert_eq!(request.get_channel(), 3);
                 assert_eq!(request.get_data(), &[0, id]);
 
-                let mut response = vec![0, id];
+                let mut response = vec![0, 0, id];
                 response.extend_from_slice(path.as_bytes());
                 downlink_sender
                     .send_async(Packet::new(0, 3, response))
@@ -1347,7 +1352,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     CATALOG_CHANNEL,
-                    vec![CATALOG_GET_INFO, 0, 0, 0, 0, 0],
+                    vec![CATALOG_GET_INFO, 0, 0, 0, 0, 0, 0],
                 ))
                 .await
                 .unwrap();
@@ -1378,7 +1383,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     CATALOG_CHANNEL,
-                    vec![CATALOG_GET_INFO, 1, 0, 0, 0, 0],
+                    vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0],
                 ))
                 .await
                 .unwrap();
@@ -1396,7 +1401,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     CATALOG_CHANNEL,
-                    [vec![CATALOG_GET_ITEM, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![CATALOG_GET_ITEM, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -1436,7 +1441,7 @@ mod tests {
             .send_async(Packet::new(
                 0,
                 CATALOG_CHANNEL,
-                vec![CATALOG_GET_INFO, 1, 0, 0, 0, 0],
+                vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0],
             ))
             .await
             .unwrap();
@@ -1448,7 +1453,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     CATALOG_CHANNEL,
-                    [vec![CATALOG_GET_ITEM, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![CATALOG_GET_ITEM, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -1478,7 +1483,7 @@ mod tests {
                 &[CATALOG_GET_INFO]
             );
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             assert_eq!(
@@ -1486,7 +1491,11 @@ mod tests {
                 &[CATALOG_GET_ITEM, 0]
             );
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![0, 0, b'd', b'e', b'c', b'k', b':']))
+                .send_async(Packet::new(
+                    0,
+                    3,
+                    vec![0, 0, 0, b'd', b'e', b'c', b'k', b':'],
+                ))
                 .await
                 .unwrap();
         };
@@ -1505,7 +1514,7 @@ mod tests {
         let firmware = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 2, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 2, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             for id in 0..2 {
@@ -1514,7 +1523,7 @@ mod tests {
                     .send_async(Packet::new(
                         0,
                         3,
-                        [vec![0, id], b"deck:duplicate".to_vec()].concat(),
+                        [vec![0, 0, id], b"deck:duplicate".to_vec()].concat(),
                     ))
                     .await
                     .unwrap();
@@ -1535,7 +1544,7 @@ mod tests {
         let firmware = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let item = uplink_receiver.recv_async().await.unwrap();
@@ -1566,7 +1575,7 @@ mod tests {
         let discover = async {
             assert_eq!(uplink_receiver.recv_async().await.unwrap().get_data(), &[1]);
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             assert_eq!(
@@ -1577,7 +1586,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -1590,7 +1599,7 @@ mod tests {
             assert_eq!(request.get_channel(), 2);
             assert_eq!(request.get_data(), &[0, 0, 1]);
             downlink_sender
-                .send_async(Packet::new(0, 2, vec![0, 0, 1, 5]))
+                .send_async(Packet::new(0, 2, vec![0, 5]))
                 .await
                 .unwrap();
         };
@@ -1630,7 +1639,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1638,7 +1647,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -1652,14 +1661,14 @@ mod tests {
             assert_eq!(first.get_data(), &[0, 0, 1]);
             assert!(uplink_receiver.try_recv().is_err());
             downlink_sender
-                .send_async(Packet::new(0, 2, vec![0, 0, 1, 0]))
+                .send_async(Packet::new(0, 2, vec![0, 0, 0, 1]))
                 .await
                 .unwrap();
 
             let second = uplink_receiver.recv_async().await.unwrap();
             assert_eq!(second.get_data(), &[0, u8::MAX, 0]);
             downlink_sender
-                .send_async(Packet::new(0, 2, vec![0, u8::MAX, 0, 0]))
+                .send_async(Packet::new(0, 2, vec![0, 0, u8::MAX, 0]))
                 .await
                 .unwrap();
         };
@@ -1687,7 +1696,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     CATALOG_CHANNEL,
-                    vec![CATALOG_GET_INFO, 1, 0, 0, 0, 0],
+                    vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0],
                 ))
                 .await
                 .unwrap();
@@ -1697,7 +1706,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     CATALOG_CHANNEL,
-                    [vec![CATALOG_GET_ITEM, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![CATALOG_GET_ITEM, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -1769,7 +1778,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1777,7 +1786,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -1802,7 +1811,7 @@ mod tests {
             .send_async(Packet::new(
                 0,
                 CONTROL_CHANNEL,
-                vec![CONTROL_SET_ENABLED, 0, 1, 0],
+                vec![CONTROL_SET_ENABLED, 0, 0, 1],
             ))
             .await
             .unwrap();
@@ -1838,7 +1847,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 0, 0, 0, 0, 0]))
                 .await
                 .unwrap();
         };
@@ -1865,7 +1874,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1873,7 +1882,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -1902,7 +1911,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -1910,7 +1919,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -1950,7 +1959,7 @@ mod tests {
         let discover = async {
             assert_eq!(uplink_receiver.recv_async().await.unwrap().get_data(), &[1]);
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             assert_eq!(
@@ -1961,7 +1970,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -1993,7 +2002,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -2001,7 +2010,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -2033,7 +2042,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 2, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 2, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             for (id, path) in [(0, "deck:bcCam"), (1, "cf:nRF51")] {
@@ -2042,7 +2051,7 @@ mod tests {
                     .send_async(Packet::new(
                         0,
                         3,
-                        [vec![0, id], path.as_bytes().to_vec()].concat(),
+                        [vec![0, 0, id], path.as_bytes().to_vec()].concat(),
                     ))
                     .await
                     .unwrap();
@@ -2081,7 +2090,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -2089,7 +2098,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -2118,7 +2127,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -2126,7 +2135,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -2163,7 +2172,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -2171,7 +2180,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -2204,7 +2213,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -2212,7 +2221,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -2242,7 +2251,7 @@ mod tests {
         let discover = async {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -2250,7 +2259,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
@@ -2295,7 +2304,7 @@ mod tests {
         let firmware = async move {
             let _ = uplink_receiver.recv_async().await.unwrap();
             downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 1, 0, 0, 0, 0]))
+                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
                 .await
                 .unwrap();
             let _ = uplink_receiver.recv_async().await.unwrap();
@@ -2303,7 +2312,7 @@ mod tests {
                 .send_async(Packet::new(
                     0,
                     3,
-                    [vec![0, 0], b"deck:bcCam".to_vec()].concat(),
+                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
                 ))
                 .await
                 .unwrap();
