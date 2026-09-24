@@ -56,11 +56,12 @@
 //! ## Sourced consoles
 //!
 //! Protocol version 13 adds an immutable catalog of additional Console sources.
-//! When connecting, the library first disables all sourced consoles and discards
-//! sourced packets preceding the successful disable response. This establishes a
-//! clean library-session boundary even though CRTP has no connection-scoped remote
-//! state. Sourced-console history therefore contains only data from sources enabled
-//! by this library after that boundary.
+//! When connecting, the library first disables all sourced consoles. It holds
+//! source packets received before catalog discovery, then matches them to catalog
+//! IDs. A source's held output enters its history when the library enables that
+//! source. This can preserve output from an earlier connection, but the firmware
+//! cannot replay packets that were lost over radio. The library holds up to
+//! 64 KiB of early packets; when the buffer fills, it drops the oldest packets.
 //!
 //! Catalog discovery is lazy and cached, and transparently retries while the
 //! firmware reports that startup is not yet complete. Older protocol versions
@@ -94,7 +95,7 @@
 //! Catalog and control transactions continue internally if their calling future is
 //! dropped, keeping subsequent request and response pairs synchronized.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -115,6 +116,7 @@ const CATALOG_CHANNEL: u8 = 3;
 const CATALOG_GET_ITEM: u8 = 0;
 const CATALOG_GET_INFO: u8 = 1;
 const NOT_READY_RETRY_DELAY: Duration = Duration::from_millis(10);
+const EARLY_SOURCE_BUFFER_LIMIT: usize = 64 * 1024;
 
 /// Identifier assigned to a sourced console for the current Crazyflie boot.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -244,7 +246,7 @@ impl ConsoleSourceState {
 /// Determines whether a source stream replays connection-lifetime history.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConsoleHistory {
-    /// Replay all data received by the library, then continue live.
+    /// Replay this source's available history, then continue live.
     Replay,
     /// Start with the next item emitted after the stream's creation point.
     ///
@@ -505,12 +507,61 @@ enum ConsoleCommand {
     Shutdown,
 }
 
-// Registration and router closure must be serialized: a source registered
-// after EOF would otherwise never be closed.
+// Registration, release of early packets, and router closure must be serialized.
 #[derive(Default)]
 struct ConsoleSourceRegistry {
     states: BTreeMap<u8, Arc<ConsoleSourceState>>,
+    early_packets: VecDeque<(u8, Vec<u8>)>,
+    early_bytes: usize,
+    held_sources: BTreeSet<u8>,
+    catalog_known: bool,
     closed: bool,
+}
+
+impl ConsoleSourceRegistry {
+    fn packet_size(bytes: &[u8]) -> usize {
+        bytes.len() + std::mem::size_of::<(u8, Vec<u8>)>()
+    }
+
+    fn hold_early(&mut self, source_id: u8, bytes: &[u8]) {
+        self.held_sources.insert(source_id);
+        let size = Self::packet_size(bytes);
+        self.early_packets.push_back((source_id, bytes.to_vec()));
+        self.early_bytes += size;
+        while self.early_bytes > EARLY_SOURCE_BUFFER_LIMIT {
+            if let Some((_, removed)) = self.early_packets.pop_front() {
+                self.early_bytes -= Self::packet_size(&removed);
+            }
+        }
+    }
+
+    async fn release(&mut self, selector: ConsoleSourceSelector) -> Result<()> {
+        if self.closed {
+            return Err(Error::Disconnected);
+        }
+        let ids: Vec<_> = match selector {
+            ConsoleSourceSelector::Source(id) => vec![id.get()],
+            ConsoleSourceSelector::All => self.states.keys().copied().collect(),
+        };
+        for id in ids {
+            if !self.held_sources.remove(&id) {
+                continue;
+            }
+            let mut remaining = VecDeque::new();
+            while let Some((packet_id, bytes)) = self.early_packets.pop_front() {
+                if packet_id == id {
+                    self.early_bytes -= Self::packet_size(&bytes);
+                    if let Some(state) = self.states.get(&id) {
+                        state.push_bytes(&bytes).await;
+                    }
+                } else {
+                    remaining.push_back((packet_id, bytes));
+                }
+            }
+            self.early_packets = remaining;
+        }
+        Ok(())
+    }
 }
 
 struct ConsoleTransactionWorker {
@@ -737,6 +788,14 @@ impl ConsoleTransactionWorker {
                     .states
                     .insert(source.id.get(), source.state.clone());
             }
+            registry.catalog_known = true;
+            registry.early_packets.retain(|(id, _)| *id < source_count);
+            registry.held_sources.retain(|id| *id < source_count);
+            registry.early_bytes = registry
+                .early_packets
+                .iter()
+                .map(|(_, bytes)| ConsoleSourceRegistry::packet_size(bytes))
+                .sum();
         }
 
         Ok(ConsoleCatalog {
@@ -747,6 +806,9 @@ impl ConsoleTransactionWorker {
 
     async fn set_enabled(&self, selector: ConsoleSourceSelector, enabled: bool) -> Result<()> {
         match set_enabled_raw(&self.uplink, &self.control_downlink, selector, enabled).await? {
+            SetEnabledResponse::Success if enabled => {
+                self.source_states.lock().await.release(selector).await
+            }
             SetEnabledResponse::Success => Ok(()),
             SetEnabledResponse::CommandError(errno) => {
                 Err(command_rejected(selector, enabled, errno))
@@ -845,13 +907,10 @@ impl Console {
                         let Some((&source_id, bytes)) = data.split_first() else {
                             continue;
                         };
-                        let state = routed_source_states
-                            .lock()
-                            .await
-                            .states
-                            .get(&source_id)
-                            .cloned();
-                        if let Some(state) = state {
+                        let mut registry = routed_source_states.lock().await;
+                        if !registry.catalog_known || registry.held_sources.contains(&source_id) {
+                            registry.hold_early(source_id, bytes);
+                        } else if let Some(state) = registry.states.get(&source_id) {
                             state.push_bytes(bytes).await;
                         }
                     }
@@ -929,6 +988,9 @@ impl Console {
     }
 
     /// Enables one sourced console or every source in the catalog.
+    ///
+    /// On success, packets held before catalog discovery enter the selected
+    /// sources' histories before this method returns.
     pub async fn enable(&self, selector: ConsoleSourceSelector) -> Result<()> {
         self.set_enabled(selector, true).await
     }
@@ -1053,7 +1115,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn initialization_discards_inherited_source_packets() {
+    async fn initialization_retains_early_packets_until_the_source_is_enabled() {
         let (uplink, uplink_receiver) = channel::unbounded();
         let (downlink_sender, downlink) = channel::unbounded();
         let construction = Console::new(downlink, uplink, 13);
@@ -1087,6 +1149,22 @@ mod tests {
         downlink_sender
             .send_async(Packet::new(
                 CONSOLE_PORT,
+                1,
+                [vec![42], b"unknown".to_vec()].concat(),
+            ))
+            .await
+            .unwrap();
+        downlink_sender
+            .send_async(Packet::new(
+                CONSOLE_PORT,
+                1,
+                [vec![1], b"other source".to_vec()].concat(),
+            ))
+            .await
+            .unwrap();
+        downlink_sender
+            .send_async(Packet::new(
+                CONSOLE_PORT,
                 CONTROL_CHANNEL,
                 vec![CONTROL_SET_ENABLED, 0, u8::MAX, 0],
             ))
@@ -1103,7 +1181,7 @@ mod tests {
                 .send_async(Packet::new(
                     CONSOLE_PORT,
                     CATALOG_CHANNEL,
-                    vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0],
+                    vec![CATALOG_GET_INFO, 0, 2, 0, 0, 0, 0],
                 ))
                 .await
                 .unwrap();
@@ -1119,14 +1197,51 @@ mod tests {
                 ))
                 .await
                 .unwrap();
+            assert_eq!(
+                uplink_receiver.recv_async().await.unwrap().get_data(),
+                &[CATALOG_GET_ITEM, 1]
+            );
+            downlink_sender
+                .send_async(Packet::new(
+                    CONSOLE_PORT,
+                    CATALOG_CHANNEL,
+                    [vec![CATALOG_GET_ITEM, 0, 1], b"cf:nRF51".to_vec()].concat(),
+                ))
+                .await
+                .unwrap();
         };
         let (catalog, ()) = join!(console.catalog(), discover);
-        let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
+        let catalog = catalog.unwrap();
+        let source = catalog.find("deck:bcCam").unwrap().clone();
+        let other = catalog.find("cf:nRF51").unwrap().clone();
         let mut bytes = source.byte_stream(ConsoleHistory::Replay).await;
+        let mut other_bytes = other.byte_stream(ConsoleHistory::Replay).await;
+        downlink_sender
+            .send_async(Packet::new(
+                CONSOLE_PORT,
+                1,
+                [vec![0], b"after catalog".to_vec()].concat(),
+            ))
+            .await
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), bytes.next())
+                .await
+                .is_err(),
+            "early output was visible before the source was enabled"
+        );
 
         let enable = async {
             let request = uplink_receiver.recv_async().await.unwrap();
             assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, 0, 1]);
+            downlink_sender
+                .send_async(Packet::new(
+                    CONSOLE_PORT,
+                    1,
+                    [vec![0], b"before reply".to_vec()].concat(),
+                ))
+                .await
+                .unwrap();
             downlink_sender
                 .send_async(Packet::new(
                     CONSOLE_PORT,
@@ -1147,13 +1262,33 @@ mod tests {
             ))
             .await
             .unwrap();
+        assert_eq!(bytes.next().await.unwrap(), b"stale one");
+        assert_eq!(bytes.next().await.unwrap(), b"stale two");
+        assert_eq!(bytes.next().await.unwrap(), b"after catalog");
+        assert_eq!(bytes.next().await.unwrap(), b"before reply");
         assert_eq!(bytes.next().await.unwrap(), b"fresh");
         assert!(
-            tokio::time::timeout(Duration::from_millis(20), bytes.next())
+            tokio::time::timeout(Duration::from_millis(20), other_bytes.next())
                 .await
                 .is_err(),
-            "inherited sourced-console data entered the new session history"
+            "enabling one source released another source's early output"
         );
+
+        let enable_other = async {
+            let request = uplink_receiver.recv_async().await.unwrap();
+            assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, 1, 1]);
+            downlink_sender
+                .send_async(Packet::new(
+                    CONSOLE_PORT,
+                    CONTROL_CHANNEL,
+                    vec![CONTROL_SET_ENABLED, 0, 1, 1],
+                ))
+                .await
+                .unwrap();
+        };
+        let (enabled, ()) = join!(console.enable(other.selector()), enable_other);
+        enabled.unwrap();
+        assert_eq!(other_bytes.next().await.unwrap(), b"other source");
     }
 
     #[tokio::test]
