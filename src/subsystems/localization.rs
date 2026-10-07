@@ -82,6 +82,7 @@ const EXT_POSE: u8 = 8;
 const _EXT_POSE_PACKED: u8 = 9;
 const LH_ANGLE_STREAM: u8 = 10;
 const LH_PERSIST_DATA: u8 = 11;
+const LH_MATCHED_ANGLE_STREAM: u8 = 12;
 
 /// Lighthouse angle sweep data
 #[derive(Debug, Clone)]
@@ -90,6 +91,23 @@ pub struct LighthouseAngleData {
     pub base_station: u8,
     /// Angle measurements
     pub angles: LighthouseAngles,
+}
+
+/// Lighthouse sweep angle data from the matched angle stream
+///
+/// The Crazyflie sends one packet per base station. Packets that were sampled
+/// at the same time share a `group_id`, and `bs_count` tells how many packets
+/// belong to the group.
+#[derive(Debug, Clone)]
+pub struct LighthouseMatchedAngleData {
+    /// Base station ID
+    pub base_station: u8,
+    /// Angle measurements
+    pub angles: LighthouseAngles,
+    /// Group ID (0-15, wraps around)
+    pub group_id: u8,
+    /// Number of base stations in the group
+    pub bs_count: u8,
 }
 
 /// Lighthouse sweep angles for all 4 sensors
@@ -122,10 +140,12 @@ impl Localization {
         let external_pose = ExternalPose { uplink: uplink.clone() };
 
         let (mut angle_broadcast, angle_receiver) = broadcast(100);
+        let (mut matched_angle_broadcast, matched_angle_receiver) = broadcast(100);
         let (mut persist_broadcast, persist_receiver) = broadcast(10);
 
         // Enable overflow mode so old messages are dropped instead of blocking
         angle_broadcast.set_overflow(true);
+        matched_angle_broadcast.set_overflow(true);
         persist_broadcast.set_overflow(true);
 
         // Spawn background task to process incoming localization packets
@@ -144,6 +164,11 @@ impl Localization {
                             let _ = angle_broadcast.broadcast(angle_data).await;
                         }
                     }
+                    LH_MATCHED_ANGLE_STREAM => {
+                        if let Ok(angle_data) = decode_matched_lh_angle(data) {
+                            let _ = matched_angle_broadcast.broadcast(angle_data).await;
+                        }
+                    }
                     LH_PERSIST_DATA if !data.is_empty() => {
                         let success = data[0] != 0;
                         let _ = persist_broadcast.broadcast(success).await;
@@ -156,6 +181,7 @@ impl Localization {
         let lighthouse = Lighthouse {
             uplink: uplink.clone(),
             angle_stream_receiver: angle_receiver,
+            matched_angle_stream_receiver: matched_angle_receiver,
             persist_receiver,
         };
 
@@ -182,39 +208,46 @@ fn decode_lh_angle(data: &[u8]) -> Result<LighthouseAngleData> {
         return Err(Error::ProtocolError("LH_ANGLE_STREAM packet too short".to_owned()));
     }
 
-    let base_station = data[0];
-
-    // Read x[0] as f32
-    let x0 = f32::from_le_bytes([data[1], data[2], data[3], data[4]]);
-
-    // Read x diffs as i16 and convert from fp16
-    let x1_diff_i16 = i16::from_le_bytes([data[5], data[6]]);
-    let x2_diff_i16 = i16::from_le_bytes([data[7], data[8]]);
-    let x3_diff_i16 = i16::from_le_bytes([data[9], data[10]]);
-
-    let x1 = x0 - f16::from_bits(x1_diff_i16 as u16).to_f32();
-    let x2 = x0 - f16::from_bits(x2_diff_i16 as u16).to_f32();
-    let x3 = x0 - f16::from_bits(x3_diff_i16 as u16).to_f32();
-
-    // Read y[0] as f32
-    let y0 = f32::from_le_bytes([data[11], data[12], data[13], data[14]]);
-
-    // Read y diffs as i16 and convert from fp16
-    let y1_diff_i16 = i16::from_le_bytes([data[15], data[16]]);
-    let y2_diff_i16 = i16::from_le_bytes([data[17], data[18]]);
-    let y3_diff_i16 = i16::from_le_bytes([data[19], data[20]]);
-
-    let y1 = y0 - f16::from_bits(y1_diff_i16 as u16).to_f32();
-    let y2 = y0 - f16::from_bits(y2_diff_i16 as u16).to_f32();
-    let y3 = y0 - f16::from_bits(y3_diff_i16 as u16).to_f32();
-
     Ok(LighthouseAngleData {
-        base_station,
-        angles: LighthouseAngles {
-            x: [x0, x1, x2, x3],
-            y: [y0, y1, y2, y3],
-        },
+        base_station: data[0],
+        angles: decode_lh_angles(&data[1..21]),
     })
+}
+
+/// Decode lighthouse matched angle stream packet
+///
+/// Packet format: '<BfhhhfhhhB'
+/// - Same as [decode_lh_angle], followed by
+/// - B: group ID (upper 4 bits) and base station count (lower 4 bits)
+fn decode_matched_lh_angle(data: &[u8]) -> Result<LighthouseMatchedAngleData> {
+    if data.len() < 22 {
+        return Err(Error::ProtocolError("LH_MATCHED_ANGLE_STREAM packet too short".to_owned()));
+    }
+
+    Ok(LighthouseMatchedAngleData {
+        base_station: data[0],
+        angles: decode_lh_angles(&data[1..21]),
+        group_id: data[21] >> 4,
+        bs_count: data[21] & 0x0F,
+    })
+}
+
+/// Decode the 20 bytes of sweep angles shared by the angle stream packets
+fn decode_lh_angles(data: &[u8]) -> LighthouseAngles {
+    // Each sweep is the first sensor's angle as f32, followed by the
+    // differences to the other 3 sensors as int16 fp16
+    let decode_sweep = |d: &[u8]| -> [f32; 4] {
+        let first = f32::from_le_bytes([d[0], d[1], d[2], d[3]]);
+        let other = |offset: usize| {
+            first - f16::from_bits(u16::from_le_bytes([d[offset], d[offset + 1]])).to_f32()
+        };
+        [first, other(4), other(6), other(8)]
+    };
+
+    LighthouseAngles {
+        x: decode_sweep(&data[0..10]),
+        y: decode_sweep(&data[10..20]),
+    }
 }
 
 /// Emergency control interface
@@ -341,6 +374,7 @@ impl LocoPositioning {
 pub struct Lighthouse {
     uplink: Sender<Packet>,
     angle_stream_receiver: BroadcastReceiver<LighthouseAngleData>,
+    matched_angle_stream_receiver: BroadcastReceiver<LighthouseMatchedAngleData>,
     persist_receiver: BroadcastReceiver<bool>,
 }
 
@@ -372,6 +406,41 @@ impl Lighthouse {
     /// ```
     pub async fn angle_stream(&self) -> impl Stream<Item = LighthouseAngleData> + use<> {
         self.angle_stream_receiver.clone()
+    }
+
+    /// Get a stream of matched lighthouse angle measurements
+    ///
+    /// Returns a Stream that yields [LighthouseMatchedAngleData] whenever matched
+    /// lighthouse sweep angle data is received from the Crazyflie. Unlike
+    /// [angle_stream](Self::angle_stream), packets are sent in groups of samples
+    /// from several base stations taken at about the same time, which is what
+    /// geometry estimation needs.
+    ///
+    /// The stream is controlled by these parameters on the Crazyflie:
+    /// - `locSrv.enLhMtchStm`: number of groups to send (0 = off, 255 = continuous)
+    /// - `locSrv.minBsLhMtchStm`: minimum number of base stations in a group
+    /// - `locSrv.maxTimeLhMtchStm`: maximum time span of a group (ms)
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use crazyflie_lib::Crazyflie;
+    /// # use futures::StreamExt;
+    /// # async fn example(crazyflie: &Crazyflie) -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut angle_stream = crazyflie.localization.lighthouse.matched_angle_stream().await;
+    ///
+    /// // Send groups with at least 2 base stations continuously
+    /// crazyflie.param.set("locSrv.minBsLhMtchStm", 2u8).await?;
+    /// crazyflie.param.set("locSrv.enLhMtchStm", 255u8).await?;
+    ///
+    /// while let Some(data) = angle_stream.next().await {
+    ///     println!("Group {} ({} base stations), base station {}: x={:?}, y={:?}",
+    ///         data.group_id, data.bs_count, data.base_station, data.angles.x, data.angles.y);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn matched_angle_stream(&self) -> impl Stream<Item = LighthouseMatchedAngleData> + use<> {
+        self.matched_angle_stream_receiver.clone()
     }
 
     /// Persist lighthouse geometry and calibration data to permanent storage
