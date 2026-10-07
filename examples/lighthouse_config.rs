@@ -23,6 +23,7 @@ use crazyflie_lib::subsystems::memory::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+use std::time::Duration;
 
 /// Lighthouse configuration file
 #[derive(Debug, Serialize, Deserialize)]
@@ -214,6 +215,13 @@ async fn write_config(
         calibrations.insert(bs_id, calibration);
     }
 
+    // Set the system type first: changing it clears the geometry and calibration data in
+    // the Crazyflie's RAM when Base stations are visible. The switch can take up to 0.5s
+    // and setting the parameter gives no signal when it is done, so wait before writing.
+    println!("Setting system type to {}...", config.system_type);
+    crazyflie.param.set("lighthouse.systemType", config.system_type).await?;
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
     println!("Writing geometries...");
     let geo_report = lighthouse.write_geometries(&geometries).await?;
     print_report(&geo_report, &config.geos);
@@ -221,9 +229,6 @@ async fn write_config(
     println!("Writing calibrations...");
     let calib_report = lighthouse.write_calibrations(&calibrations).await?;
     print_report(&calib_report, &config.calibs);
-
-    println!("Setting system type to {}...", config.system_type);
-    crazyflie.param.set("lighthouse.systemType", config.system_type).await?;
 
     // Only the written slots are persisted
     println!("Persisting data...");
@@ -233,12 +238,11 @@ async fn write_config(
         .persist_lighthouse_data(&geo_report.written, &calib_report.written)
         .await?;
 
-    if persisted {
-        println!("✓ Configuration written and persisted!");
-    } else {
-        println!("✗ Persistence failed!");
+    if !persisted {
+        return Err("Persisting the configuration failed".into());
     }
 
+    println!("✓ Configuration written and persisted!");
     Ok(())
 }
 
