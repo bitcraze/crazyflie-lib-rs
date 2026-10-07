@@ -18,77 +18,11 @@
 use crazyflie_lib::Crazyflie;
 use crazyflie_lib::crazyflie_link::LinkContext;
 use crazyflie_lib::subsystems::memory::{
-    LighthouseBsCalibration, LighthouseBsGeometry, LighthouseCalibrationSweep, LighthouseMemory,
+    LighthouseBsCalibration, LighthouseBsGeometry, LighthouseConfig, LighthouseMemory,
     LighthouseWriteReport, MemoryType,
 };
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::time::Duration;
-
-/// Lighthouse configuration file
-#[derive(Debug, Serialize, Deserialize)]
-struct ConfigFile {
-    #[serde(default)]
-    calibs: BTreeMap<u8, CalibrationEntry>,
-    #[serde(default)]
-    geos: BTreeMap<u8, GeometryEntry>,
-    #[serde(rename = "systemType")]
-    system_type: u8,
-    #[serde(rename = "type")]
-    file_type: String,
-    version: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct GeometryEntry {
-    origin: [f32; 3],
-    rotation: [[f32; 3]; 3],
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct CalibrationEntry {
-    sweeps: [SweepEntry; 2],
-    uid: u32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct SweepEntry {
-    curve: f32,
-    gibmag: f32,
-    gibphase: f32,
-    ogeemag: f32,
-    ogeephase: f32,
-    phase: f32,
-    tilt: f32,
-}
-
-impl From<&LighthouseCalibrationSweep> for SweepEntry {
-    fn from(sweep: &LighthouseCalibrationSweep) -> Self {
-        Self {
-            curve: sweep.curve,
-            gibmag: sweep.gibmag,
-            gibphase: sweep.gibphase,
-            ogeemag: sweep.ogeemag,
-            ogeephase: sweep.ogeephase,
-            phase: sweep.phase,
-            tilt: sweep.tilt,
-        }
-    }
-}
-
-impl From<&SweepEntry> for LighthouseCalibrationSweep {
-    fn from(entry: &SweepEntry) -> Self {
-        Self {
-            phase: entry.phase,
-            tilt: entry.tilt,
-            curve: entry.curve,
-            gibmag: entry.gibmag,
-            gibphase: entry.gibphase,
-            ogeemag: entry.ogeemag,
-            ogeephase: entry.ogeephase,
-        }
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -148,33 +82,13 @@ async fn read_config(
     let calibrations = lighthouse.read_all_calibrations().await?;
     let system_type: u8 = crazyflie.param.get("lighthouse.systemType").await?;
 
-    let config = ConfigFile {
-        calibs: calibrations
-            .iter()
-            .map(|(&bs_id, calib)| {
-                let entry = CalibrationEntry {
-                    sweeps: [(&calib.sweeps[0]).into(), (&calib.sweeps[1]).into()],
-                    uid: calib.uid,
-                };
-                (bs_id, entry)
-            })
-            .collect(),
-        geos: geometries
-            .iter()
-            .map(|(&bs_id, geo)| {
-                let entry = GeometryEntry {
-                    origin: geo.origin,
-                    rotation: geo.rotation_matrix,
-                };
-                (bs_id, entry)
-            })
-            .collect(),
+    let config = LighthouseConfig {
         system_type,
-        file_type: "lighthouse_system_configuration".to_string(),
-        version: "1".to_string(),
+        geometries,
+        calibrations,
     };
 
-    println!("\n{}", serde_yaml::to_string(&config)?);
+    println!("\n{}", config.to_yaml()?);
 
     Ok(())
 }
@@ -185,7 +99,9 @@ async fn write_config(
     lighthouse: &LighthouseMemory,
     path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let config: ConfigFile = serde_yaml::from_str(&std::fs::read_to_string(path)?)?;
+    // Checks the file type, version, system type and base station IDs, so an
+    // invalid file fails here, before anything is written to the Crazyflie
+    let config = LighthouseConfig::from_yaml(&std::fs::read_to_string(path)?)?;
     println!("\nLoaded {}", path);
 
     // Start with empty (invalid) data in all 16 slots, so base stations that are
@@ -197,23 +113,8 @@ async fn write_config(
     let mut calibrations: HashMap<u8, LighthouseBsCalibration> = (0..LighthouseMemory::MAX_BASE_STATIONS as u8)
         .map(|bs_id| (bs_id, LighthouseBsCalibration::default()))
         .collect();
-
-    for (&bs_id, entry) in &config.geos {
-        let geometry = LighthouseBsGeometry {
-            origin: entry.origin,
-            rotation_matrix: entry.rotation,
-            valid: true,
-        };
-        geometries.insert(bs_id, geometry);
-    }
-    for (&bs_id, entry) in &config.calibs {
-        let calibration = LighthouseBsCalibration {
-            sweeps: [(&entry.sweeps[0]).into(), (&entry.sweeps[1]).into()],
-            uid: entry.uid,
-            valid: true,
-        };
-        calibrations.insert(bs_id, calibration);
-    }
+    geometries.extend(config.geometries.clone());
+    calibrations.extend(config.calibrations.clone());
 
     // Set the system type first: changing it clears the geometry and calibration data in
     // the Crazyflie's RAM when Base stations are visible. The switch can take up to 0.5s
@@ -224,11 +125,11 @@ async fn write_config(
 
     println!("Writing geometries...");
     let geo_report = lighthouse.write_geometries(&geometries).await?;
-    print_report(&geo_report, &config.geos);
+    print_report(&geo_report, &config.geometries);
 
     println!("Writing calibrations...");
     let calib_report = lighthouse.write_calibrations(&calibrations).await?;
-    print_report(&calib_report, &config.calibs);
+    print_report(&calib_report, &config.calibrations);
 
     // Only the written slots are persisted
     println!("Persisting data...");
@@ -248,7 +149,7 @@ async fn write_config(
 
 /// Print which base stations from the file were written, which slots were
 /// cleared, and which slots the Crazyflie does not support
-fn print_report<T>(report: &LighthouseWriteReport, from_file: &BTreeMap<u8, T>) {
+fn print_report<T>(report: &LighthouseWriteReport, from_file: &HashMap<u8, T>) {
     let (written, cleared): (Vec<u8>, Vec<u8>) = report
         .written
         .iter()
