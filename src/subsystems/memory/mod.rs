@@ -22,6 +22,7 @@ mod raw;
 mod ow;
 mod trajectory;
 mod lighthouse;
+mod lighthouse_config;
 mod loco2;
 mod led_driver;
 
@@ -34,6 +35,7 @@ pub use raw::*;
 pub use ow::*;
 pub use trajectory::*;
 pub use lighthouse::*;
+pub use lighthouse_config::*;
 pub use loco2::*;
 pub use led_driver::*;
 
