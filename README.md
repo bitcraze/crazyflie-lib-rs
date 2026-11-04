@@ -38,3 +38,8 @@ The [python Crazyflie lib] implements a bunch of higher-level functionality like
 [Crazyflie]: https://www.bitcraze.io/products/crazyflie-2-1/
 [python Crazyflie lib]: https://github.com/bitcraze/crazyflie-lib-python
 [swarm support]: https://www.bitcraze.io/documentation/repository/crazyflie-lib-python/master/api/cflib/crazyflie/swarm/
+
+## Contribute
+Before you open a pull request, please read our [General guidelines for code contributions](https://www.bitcraze.io/development/contribute/general-guidelines/).
+
+For other ways to contribute, see the [contribute page](https://www.bitcraze.io/development/contribute/).
