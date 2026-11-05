@@ -19,9 +19,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-        let mut console_stream = cf.console.line_stream().await;
+        let mut console = cf.console.open("cf:stm32").await?;
+        let mut lines = console.lines();
 
-        while let Ok(Some(line)) = timeout(Duration::from_secs(10), console_stream.next()).await {
+        while let Ok(Some(line)) = timeout(Duration::from_secs(10), lines.next()).await {
             println!("{}", line);
         }
 
