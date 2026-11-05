@@ -1,99 +1,65 @@
 //! # Console subsystem
 //!
-//! The Crazyflie has a test console that is used to communicate various information
-//! and debug message to the ground.
+//! The Crazyflie exposes several text consoles used to send information and
+//! debug messages to the ground. Each console has a path, such as `cf:stm32` for
+//! the Crazyflie's STM32 or `deck:bcCam` for the Camera Deck.
 //!
-//! The log is available either as a data stream that produces the same data as
-//! returned by the crazyflie (ie. can be incomplete lines):
-//! ``` no_run
-//! use futures::StreamExt;
-//!
-//! # async fn as_stream(crazyflie: &crazyflie_lib::Crazyflie) {
-//! let mut console_stream = crazyflie.console.stream().await;
-//!
-//! while let Some(data) = console_stream.next().await {
-//!     println!("{}", data);
-//! }
-//! // If the Crazyflie send "Hello .................................................... World!"
-//! // The println would show:
-//! // Hello ........................
-//! // ............................ W
-//! // orld!
-//! # }
-//! ```
-//!
-//! Or a line streams that assemble and returns full lines:
-//! ``` no_run
-//! use futures::StreamExt;
-//!
-//! # async fn as_stream(crazyflie: &crazyflie_lib::Crazyflie) {
-//! let mut line_stream = crazyflie.console.line_stream().await;
-//!
-//! while let Some(data) = line_stream.next().await {
-//!     println!("{}", data);
-//! }
-//! // If the Crazyflie send "Hello .................................................... World!"
-//! // The println would show:
-//! // Hello .................................................... World!
-//! # }
-//! ```
-//!
-//! The data received from the Crazyflie is decoded as
-//! [UTF8 lossy](String::from_utf8_lossy()). before being sent as [String] to the
-//! streams.
-//!
-//! ## History or no History
-//!
-//! By default, the [Console::stream()] and [Console::line_stream()] functions
-//! will return a stream that will produce the full console history since connection
-//! and then produce the console as it arrives from the Crazyflie. This is needed
-//! if the startup message needs to be displayed but can be problematic for more
-//! advanced use-case to observe the console some time after the connection only.
-//!
-//! There exist functions for both data stream and line stream to get the stream
-//! without getting the history first.
-//!
-//! ## Sourced consoles
-//!
-//! Protocol version 13 adds an immutable catalog of additional Console sources.
-//! When connecting, the library first disables all sourced consoles. It holds
-//! source packets received before catalog discovery, then matches them to catalog
-//! IDs. A source's held output enters its history when the library enables that
-//! source. This can preserve output from an earlier connection, but the firmware
-//! cannot replay packets that were lost over radio. The library holds up to
-//! 64 KiB of early packets; when the buffer fills, it drops the oldest packets.
-//!
-//! Catalog discovery is lazy and cached, and transparently retries while the
-//! firmware reports that startup is not yet complete. Older protocol versions
-//! return an empty catalog, so callers can use the same discovery flow across
-//! supported firmware:
+//! [Console::list()] returns the paths available on the connected Crazyflie and
+//! [Console::open()] returns a [ConsoleHandle] that is ready to be read:
 //!
 //! ```no_run
-//! use crazyflie_lib::subsystems::console::ConsoleHistory;
 //! use futures::StreamExt;
 //!
-//! # async fn show_first_source(cf: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
-//! let catalog = cf.console.catalog().await?;
-//! if let Some(source) = catalog.iter().next() {
-//!     let selector = source.selector();
-//!     let mut lines = source.line_stream(ConsoleHistory::Replay).await;
-//!     cf.console.enable(selector).await?;
+//! # async fn show_consoles(cf: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
+//! println!("Available consoles: {:?}", cf.console.list().await?);
 //!
-//!     if let Some(line) = lines.next().await {
-//!         println!("[{}] {line}", source.path());
-//!     }
-//!
-//!     cf.console.disable(selector).await?;
+//! let mut console = cf.console.open("cf:stm32").await?;
+//! let mut lines = console.lines();
+//! while let Some(line) = lines.next().await {
+//!     println!("{line}");
 //! }
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! A source exposes independent byte, incrementally decoded text, and complete-line
-//! streams. Only enable and disable operations accept an all-sources selector; data
-//! streams always belong to exactly one [`ConsoleSource`].
-//! Catalog and control transactions continue internally if their calling future is
-//! dropped, keeping subsequent request and response pairs synchronized.
+//! A handle offers three views of the same output: complete
+//! [lines](ConsoleHandle::lines()), incrementally decoded
+//! [text](ConsoleHandle::text()) and raw [bytes](ConsoleHandle::bytes()). Text is
+//! decoded as [UTF-8 lossy](String::from_utf8_lossy()), including characters split
+//! across radio packets.
+//!
+//! ## History
+//!
+//! [Console::open()] first replays the console's output since connection, and then
+//! continues with new output. This is needed to see startup messages.
+//! [Console::open_live()] skips everything received before the console was opened.
+//!
+//! ## Closing a console
+//!
+//! Dropping the last [ConsoleHandle] of a console asks the Crazyflie to stop
+//! sending its output. [ConsoleHandle::close()] does the same but waits for the
+//! Crazyflie's answer and reports any error. Handles are independent: each has its
+//! own reading position, and the output keeps flowing until the last one is closed.
+//!
+//! Closing does not discard anything. A later [Console::open()] replays the output
+//! already received, and a source can keep buffering new output on its side, up to
+//! its capacity, to deliver it when opened again.
+//!
+//! The `cf:stm32` console is the exception: the Crazyflie always sends it, on every
+//! firmware version, and closing it only releases the handle.
+//!
+//! ## Output from before the console is opened
+//!
+//! When connecting, the library asks the Crazyflie to stop sending all consoles
+//! other than `cf:stm32`. Output received before that takes effect can come from an
+//! earlier connection. It is held and enters the console's history when the console
+//! is first opened, though the firmware cannot replay packets lost over radio. The
+//! library holds up to 64 KiB of such output and drops the oldest packets when full.
+//!
+//! The list of consoles is discovered once, on first use, and transparently retries
+//! while the firmware reports that startup is not yet complete. Requests continue
+//! internally if their calling future is dropped, keeping subsequent requests and
+//! responses synchronized.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -102,66 +68,25 @@ use std::time::Duration;
 
 use crate::crazyflie::CONSOLE_PORT;
 use crate::{Error, Result};
-use async_broadcast::{Receiver, broadcast};
 use crazyflie_link::Packet;
 use flume as channel;
-use futures::{Stream, StreamExt, lock::Mutex};
+use futures::{StreamExt, lock::Mutex, stream::BoxStream};
 use tokio::sync::{Notify, oneshot};
 use tokio::task::JoinHandle;
 
 const SOURCED_CONSOLE_PROTOCOL_VERSION: u8 = 13;
+const LOCAL_CHANNEL: u8 = 0;
+const SOURCED_CHANNEL: u8 = 1;
 const CONTROL_CHANNEL: u8 = 2;
 const CONTROL_SET_ENABLED: u8 = 0;
 const CATALOG_CHANNEL: u8 = 3;
 const CATALOG_GET_ITEM: u8 = 0;
 const CATALOG_GET_INFO: u8 = 1;
+const ALL_SOURCES: u8 = u8::MAX;
 const NOT_READY_RETRY_DELAY: Duration = Duration::from_millis(10);
 const EARLY_SOURCE_BUFFER_LIMIT: usize = 64 * 1024;
-
-/// Identifier assigned to a sourced console for the current Crazyflie boot.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct ConsoleSourceId(u8);
-
-impl ConsoleSourceId {
-    /// Constructs a source identifier, rejecting the reserved all-sources value.
-    pub const fn new(value: u8) -> Option<Self> {
-        if value == u8::MAX {
-            None
-        } else {
-            Some(Self(value))
-        }
-    }
-
-    /// Returns the protocol source identifier.
-    pub const fn get(self) -> u8 {
-        self.0
-    }
-}
-
-/// Immutable metadata for one sourced console.
-#[derive(Clone)]
-pub struct ConsoleSource {
-    id: ConsoleSourceId,
-    path: Arc<str>,
-    state: Arc<ConsoleSourceState>,
-}
-
-impl std::fmt::Debug for ConsoleSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConsoleSource")
-            .field("id", &self.id)
-            .field("path", &self.path)
-            .finish()
-    }
-}
-
-impl PartialEq for ConsoleSource {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id && self.path == other.path
-    }
-}
-
-impl Eq for ConsoleSource {}
+/// Implicit path of channel 0, which the firmware does not list in its catalog.
+const STM32_PATH: &str = "cf:stm32";
 
 #[derive(Default)]
 struct ConsoleSourceHistory {
@@ -243,188 +168,232 @@ impl ConsoleSourceState {
     }
 }
 
-/// Determines whether a source stream replays connection-lifetime history.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConsoleHistory {
-    /// Replay this source's available history, then continue live.
-    Replay,
-    /// Start with the next item emitted after the stream's creation point.
-    ///
-    /// A text item may finish a code point, and a line may finish a line, that
-    /// began before the stream was created.
+/// Where a new handle starts reading.
+#[derive(Clone, Copy)]
+enum StartAt {
+    History,
     Live,
 }
 
-impl ConsoleSource {
-    /// Returns the boot-lifetime source identifier.
-    pub const fn id(&self) -> ConsoleSourceId {
-        self.id
+/// Sends the release command for a handle whose source the firmware can disable.
+struct SourceRelease {
+    id: u8,
+    // Weak so that a handle outliving the Crazyflie does not keep the worker alive.
+    commands: channel::WeakSender<ConsoleCommand>,
+}
+
+impl SourceRelease {
+    fn send(self, reply: Option<oneshot::Sender<Result<()>>>) -> Result<()> {
+        let commands = self.commands.upgrade().ok_or(Error::Disconnected)?;
+        commands
+            .send(ConsoleCommand::Release { id: self.id, reply })
+            .map_err(|_| Error::Disconnected)
+    }
+}
+
+/// An open console of the Crazyflie.
+///
+/// See the [console module documentation](crate::subsystems::console) for more
+/// context. Output flows from the Crazyflie as long as a handle to this console
+/// exists: use [ConsoleHandle::close()] or drop the handle to stop it.
+///
+/// The streams returned by this handle borrow it, so a stream can never outlive
+/// the handle that keeps its output flowing:
+///
+/// ```compile_fail,E0505
+/// # async fn outlive(cf: &crazyflie_lib::Crazyflie) -> crazyflie_lib::Result<()> {
+/// use futures::StreamExt;
+///
+/// let mut console = cf.console.open("deck:bcCam").await?;
+/// let mut lines = console.lines();
+/// drop(console);
+/// lines.next().await;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Each view keeps its position in the handle. A stream can therefore be dropped
+/// and created again, or used in a `select!`, without losing or repeating output.
+pub struct ConsoleHandle {
+    path: Arc<str>,
+    state: Arc<ConsoleSourceState>,
+    release: Option<SourceRelease>,
+    byte_cursor: usize,
+    text_cursor: usize,
+    line_cursor: usize,
+}
+
+impl std::fmt::Debug for ConsoleHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConsoleHandle")
+            .field("path", &self.path)
+            .finish()
+    }
+}
+
+impl ConsoleHandle {
+    async fn new(
+        path: Arc<str>,
+        state: Arc<ConsoleSourceState>,
+        release: Option<SourceRelease>,
+        start: StartAt,
+    ) -> Self {
+        let (byte_cursor, text_cursor, line_cursor) = match start {
+            StartAt::History => (0, 0, 0),
+            StartAt::Live => {
+                let history = state.history.lock().await;
+                (history.bytes.len(), history.text.len(), history.lines.len())
+            }
+        };
+        Self {
+            path,
+            state,
+            release,
+            byte_cursor,
+            text_cursor,
+            line_cursor,
+        }
     }
 
-    /// Returns the display and filtering path advertised by the source.
+    /// Returns the path of this console.
     pub fn path(&self) -> &str {
         &self.path
     }
 
-    /// Returns a selector suitable for enabling or disabling this source.
-    pub const fn selector(&self) -> ConsoleSourceSelector {
-        ConsoleSourceSelector::Source(self.id)
-    }
-
-    /// Returns a stream of byte chunks received for this source.
-    ///
-    /// Chunk boundaries are transport artifacts and do not delimit text or lines.
-    pub async fn byte_stream(
-        &self,
-        history: ConsoleHistory,
-    ) -> futures::stream::BoxStream<'static, Vec<u8>> {
-        let state = self.state.clone();
-        let mut index = match history {
-            ConsoleHistory::Replay => 0,
-            ConsoleHistory::Live => state.history.lock().await.bytes.len(),
-        };
-
-        async_stream::stream! {
-            loop {
-                let notified = state.notify.notified();
-                let next = state.history.lock().await.bytes.get(index).cloned();
-                if let Some(bytes) = next {
-                    index += 1;
-                    yield bytes;
-                } else if state.closed.load(Ordering::Relaxed) {
-                    break;
-                } else {
-                    notified.await;
-                }
-            }
-        }
-        .boxed()
-    }
-
-    /// Returns incrementally decoded, loss-tolerant UTF-8 chunks for this source.
-    ///
-    /// The returned chunk boundaries do not delimit lines or records.
-    pub async fn text_stream(
-        &self,
-        history: ConsoleHistory,
-    ) -> futures::stream::BoxStream<'static, String> {
-        let state = self.state.clone();
-        let mut index = match history {
-            ConsoleHistory::Replay => 0,
-            ConsoleHistory::Live => state.history.lock().await.text.len(),
-        };
-
-        async_stream::stream! {
-            loop {
-                let notified = state.notify.notified();
-                let next = state.history.lock().await.text.get(index).cloned();
-                if let Some(text) = next {
-                    index += 1;
-                    yield text;
-                } else if state.closed.load(Ordering::Relaxed) {
-                    break;
-                } else {
-                    notified.await;
-                }
-            }
-        }
-        .boxed()
-    }
-
-    /// Returns complete, incrementally decoded lines for this source.
+    /// Returns a stream of complete lines. It ends when the Crazyflie disconnects.
     ///
     /// Newline delimiters are not included in returned strings. An incomplete
     /// final line remains buffered until a newline is received.
-    pub async fn line_stream(
-        &self,
-        history: ConsoleHistory,
-    ) -> futures::stream::BoxStream<'static, String> {
-        let state = self.state.clone();
-        let mut index = match history {
-            ConsoleHistory::Replay => 0,
-            ConsoleHistory::Live => state.history.lock().await.lines.len(),
-        };
+    pub fn lines(&mut self) -> BoxStream<'_, String> {
+        history_stream(&self.state, &mut self.line_cursor, |history| &history.lines)
+    }
 
-        async_stream::stream! {
-            loop {
-                let notified = state.notify.notified();
-                let next = state.history.lock().await.lines.get(index).cloned();
-                if let Some(line) = next {
-                    index += 1;
-                    yield line;
-                } else if state.closed.load(Ordering::Relaxed) {
-                    break;
-                } else {
-                    notified.await;
-                }
+    /// Returns a stream of incrementally decoded, loss-tolerant UTF-8 chunks. It
+    /// ends when the Crazyflie disconnects.
+    ///
+    /// The chunk boundaries do not delimit lines or records.
+    pub fn text(&mut self) -> BoxStream<'_, String> {
+        history_stream(&self.state, &mut self.text_cursor, |history| &history.text)
+    }
+
+    /// Returns a stream of received byte chunks. It ends when the Crazyflie
+    /// disconnects.
+    ///
+    /// Chunk boundaries are transport artifacts and do not delimit text or lines.
+    pub fn bytes(&mut self) -> BoxStream<'_, Vec<u8>> {
+        history_stream(&self.state, &mut self.byte_cursor, |history| &history.bytes)
+    }
+
+    /// Closes this handle and waits for the outcome.
+    ///
+    /// This ends in the same state as dropping the handle, but reports errors that
+    /// a drop has to ignore. If this was the last handle of a console the firmware
+    /// can disable, a successful return means that the firmware stopped sending
+    /// it, and that all output it sent before stopping and that was not lost over
+    /// radio has entered the console's history.
+    ///
+    /// Returns [Error::Disconnected] if the Crazyflie is no longer connected. The
+    /// request still completes if the returned future is dropped.
+    pub async fn close(mut self) -> Result<()> {
+        let Some(release) = self.release.take() else {
+            return Ok(());
+        };
+        let (reply, result) = oneshot::channel();
+        release.send(Some(reply))?;
+        result.await.map_err(|_| Error::Disconnected)?
+    }
+}
+
+impl Drop for ConsoleHandle {
+    /// Queues the same request as [ConsoleHandle::close()] without waiting for it.
+    /// A failure cannot be reported: the output keeps flowing into the history.
+    fn drop(&mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.send(None);
+        }
+    }
+}
+
+fn history_stream<'a, T>(
+    state: &'a ConsoleSourceState,
+    cursor: &'a mut usize,
+    items: for<'h> fn(&'h ConsoleSourceHistory) -> &'h [T],
+) -> BoxStream<'a, T>
+where
+    T: Clone + Send + 'a,
+{
+    async_stream::stream! {
+        loop {
+            let notified = state.notify.notified();
+            // Check closure under the lock: closing can add a final text item.
+            let (next, closed) = {
+                let history = state.history.lock().await;
+                (
+                    items(&history).get(*cursor).cloned(),
+                    state.closed.load(Ordering::Relaxed),
+                )
+            };
+            if let Some(item) = next {
+                *cursor += 1;
+                yield item;
+            } else if closed {
+                break;
+            } else {
+                notified.await;
             }
         }
-        .boxed()
     }
+    .boxed()
 }
 
-/// Selects one sourced console or every source in a catalog.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConsoleSourceSelector {
-    /// Select one catalog source.
-    Source(ConsoleSourceId),
-    /// Select every catalog source.
-    All,
-}
-
-impl ConsoleSourceSelector {
-    const fn wire_id(self) -> u8 {
-        match self {
-            Self::Source(id) => id.get(),
-            Self::All => u8::MAX,
-        }
-    }
-}
-
-/// Error specific to sourced Console operations.
+/// Error specific to Console operations.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConsoleError {
-    /// The selected source is not present in this connection's catalog.
-    UnknownSource(ConsoleSourceId),
+    /// The Crazyflie has no console with this path.
+    UnknownSource(String),
     /// The firmware rejected an enable or disable command.
     CommandRejected {
-        /// Source or all-sources selector sent to the firmware.
-        selector: ConsoleSourceSelector,
+        /// Path of the console, or `None` for the command sent to all consoles
+        /// when connecting.
+        path: Option<String>,
         /// Requested enabled state.
         enabled: bool,
         /// Raw errno-compatible result returned by the firmware.
         errno: u8,
     },
-    /// The firmware rejected a source-catalog operation.
+    /// The firmware rejected a request listing its consoles.
     CatalogCommandRejected {
-        /// Catalog operation sent to the firmware.
+        /// Operation sent to the firmware.
         operation: ConsoleCatalogOperation,
         /// Raw errno-compatible result returned by the firmware.
         errno: u8,
     },
 }
 
-/// Source-catalog operation associated with a firmware error response.
+/// Operation listing the firmware's consoles that a firmware error can answer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConsoleCatalogOperation {
-    /// Read the source count and catalog CRC.
+    /// Read the number of consoles.
     GetInfo,
-    /// Read one source entry.
-    GetItem(ConsoleSourceId),
+    /// Read the entry at this position.
+    GetItem(u8),
 }
 
 impl std::fmt::Display for ConsoleError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnknownSource(id) => write!(f, "unknown Console source {}", id.get()),
+            Self::UnknownSource(path) => write!(f, "unknown Console {path:?}"),
             Self::CommandRejected {
-                selector,
+                path,
                 enabled,
                 errno,
-            } => write!(
-                f,
-                "firmware rejected Console {selector:?} enabled={enabled} with errno {errno}"
-            ),
+            } => {
+                let path = path.as_deref().unwrap_or("all consoles");
+                write!(
+                    f,
+                    "firmware rejected {path:?} enabled={enabled} with errno {errno}"
+                )
+            }
             Self::CatalogCommandRejected { operation, errno } => write!(
                 f,
                 "firmware rejected Console catalog operation {operation:?} with errno {errno}"
@@ -435,76 +404,29 @@ impl std::fmt::Display for ConsoleError {
 
 impl std::error::Error for ConsoleError {}
 
-/// Immutable sourced-console catalog for one Crazyflie connection.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConsoleCatalog {
-    sources: Arc<[ConsoleSource]>,
-    crc32: Option<u32>,
-}
-
-impl ConsoleCatalog {
-    fn empty() -> Self {
-        Self {
-            sources: Arc::from([]),
-            crc32: None,
-        }
-    }
-
-    /// Returns the number of advertised sources.
-    pub fn len(&self) -> usize {
-        self.sources.len()
-    }
-
-    /// Returns whether no sourced consoles are advertised.
-    pub fn is_empty(&self) -> bool {
-        self.sources.is_empty()
-    }
-
-    /// Returns the firmware-provided catalog CRC, or `None` when unsupported.
-    pub const fn crc32(&self) -> Option<u32> {
-        self.crc32
-    }
-
-    /// Returns the source with the given boot-lifetime identifier.
-    pub fn get(&self, id: ConsoleSourceId) -> Option<&ConsoleSource> {
-        self.sources.iter().find(|source| source.id == id)
-    }
-
-    /// Returns the source with the given path.
-    pub fn find(&self, path: &str) -> Option<&ConsoleSource> {
-        self.sources.iter().find(|source| source.path() == path)
-    }
-
-    /// Iterates over sources in source-identifier order.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &ConsoleSource> {
-        self.sources.iter()
-    }
-
-    /// Returns a selector covering every source in this catalog.
-    pub const fn all(&self) -> ConsoleSourceSelector {
-        ConsoleSourceSelector::All
-    }
-}
-
-impl<'a> IntoIterator for &'a ConsoleCatalog {
-    type Item = &'a ConsoleSource;
-    type IntoIter = std::slice::Iter<'a, ConsoleSource>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.sources.iter()
-    }
-}
-
 enum ConsoleCommand {
-    GetCatalog {
-        reply: oneshot::Sender<Result<ConsoleCatalog>>,
+    ListPaths {
+        reply: oneshot::Sender<Result<Vec<String>>>,
     },
-    SetEnabled {
-        selector: ConsoleSourceSelector,
-        enabled: bool,
-        reply: oneshot::Sender<Result<()>>,
+    // A handle travels in the reply so that its Drop releases the source if the
+    // caller is gone, including when it goes away after the reply was sent.
+    Open {
+        path: String,
+        start: StartAt,
+        reply: oneshot::Sender<Result<ConsoleHandle>>,
+    },
+    Release {
+        id: u8,
+        reply: Option<oneshot::Sender<Result<()>>>,
     },
     Shutdown,
+}
+
+/// One entry of the firmware's catalog. Its position in the catalog is its ID.
+struct CatalogEntry {
+    path: Arc<str>,
+    state: Arc<ConsoleSourceState>,
+    handles: usize,
 }
 
 // Registration, release of early packets, and router closure must be serialized.
@@ -535,31 +457,25 @@ impl ConsoleSourceRegistry {
         }
     }
 
-    async fn release(&mut self, selector: ConsoleSourceSelector) -> Result<()> {
+    async fn release(&mut self, id: u8) -> Result<()> {
         if self.closed {
             return Err(Error::Disconnected);
         }
-        let ids: Vec<_> = match selector {
-            ConsoleSourceSelector::Source(id) => vec![id.get()],
-            ConsoleSourceSelector::All => self.states.keys().copied().collect(),
-        };
-        for id in ids {
-            if !self.held_sources.remove(&id) {
-                continue;
-            }
-            let mut remaining = VecDeque::new();
-            while let Some((packet_id, bytes)) = self.early_packets.pop_front() {
-                if packet_id == id {
-                    self.early_bytes -= Self::packet_size(&bytes);
-                    if let Some(state) = self.states.get(&id) {
-                        state.push_bytes(&bytes).await;
-                    }
-                } else {
-                    remaining.push_back((packet_id, bytes));
-                }
-            }
-            self.early_packets = remaining;
+        if !self.held_sources.remove(&id) {
+            return Ok(());
         }
+        let mut remaining = VecDeque::new();
+        while let Some((packet_id, bytes)) = self.early_packets.pop_front() {
+            if packet_id == id {
+                self.early_bytes -= Self::packet_size(&bytes);
+                if let Some(state) = self.states.get(&id) {
+                    state.push_bytes(&bytes).await;
+                }
+            } else {
+                remaining.push_back((packet_id, bytes));
+            }
+        }
+        self.early_packets = remaining;
         Ok(())
     }
 }
@@ -570,7 +486,8 @@ struct ConsoleTransactionWorker {
     catalog_downlink: channel::Receiver<Packet>,
     protocol_version: u8,
     source_states: Arc<Mutex<ConsoleSourceRegistry>>,
-    catalog: Option<ConsoleCatalog>,
+    catalog: Option<Vec<CatalogEntry>>,
+    commands: channel::WeakSender<ConsoleCommand>,
 }
 
 enum SetEnabledResponse {
@@ -598,10 +515,10 @@ fn parse_set_enabled_response(response: &Packet, request: &[u8; 3]) -> Result<Se
 async fn set_enabled_raw(
     uplink: &channel::Sender<Packet>,
     control_downlink: &channel::Receiver<Packet>,
-    selector: ConsoleSourceSelector,
+    wire_id: u8,
     enabled: bool,
 ) -> Result<SetEnabledResponse> {
-    let request = [CONTROL_SET_ENABLED, selector.wire_id(), u8::from(enabled)];
+    let request = [CONTROL_SET_ENABLED, wire_id, u8::from(enabled)];
     uplink
         .send_async(Packet::new(CONSOLE_PORT, CONTROL_CHANNEL, request.to_vec()))
         .await
@@ -614,9 +531,9 @@ async fn set_enabled_raw(
     parse_set_enabled_response(&response, &request)
 }
 
-fn command_rejected(selector: ConsoleSourceSelector, enabled: bool, errno: u8) -> Error {
+fn command_rejected(path: Option<&str>, enabled: bool, errno: u8) -> Error {
     Error::Console(ConsoleError::CommandRejected {
-        selector,
+        path: path.map(str::to_owned),
         enabled,
         errno,
     })
@@ -632,13 +549,13 @@ async fn initialize_sourced_console(
     }
 
     loop {
-        match set_enabled_raw(uplink, control_downlink, ConsoleSourceSelector::All, false).await? {
+        match set_enabled_raw(uplink, control_downlink, ALL_SOURCES, false).await? {
             SetEnabledResponse::Success => return Ok(()),
             SetEnabledResponse::CommandError(errno) if errno == crate::firmware_errno::EAGAIN => {
                 tokio::time::sleep(NOT_READY_RETRY_DELAY).await;
             }
             SetEnabledResponse::CommandError(errno) => {
-                return Err(command_rejected(ConsoleSourceSelector::All, false, errno));
+                return Err(command_rejected(None, false, errno));
             }
         }
     }
@@ -648,36 +565,88 @@ impl ConsoleTransactionWorker {
     async fn run(mut self, commands: channel::Receiver<ConsoleCommand>) {
         while let Ok(command) = commands.recv_async().await {
             match command {
-                ConsoleCommand::GetCatalog { reply } => {
-                    let result = self.get_catalog().await;
+                ConsoleCommand::ListPaths { reply } => {
+                    let result = self.catalog().await.map(|catalog| {
+                        catalog.iter().map(|entry| entry.path.to_string()).collect()
+                    });
                     let _ = reply.send(result);
                 }
-                ConsoleCommand::SetEnabled {
-                    selector,
-                    enabled,
-                    reply,
-                } => {
-                    let result = self.set_enabled(selector, enabled).await;
+                ConsoleCommand::Open { path, start, reply } => {
+                    let result = self.open(&path, start).await;
                     let _ = reply.send(result);
+                }
+                ConsoleCommand::Release { id, reply } => {
+                    let result = self.release(id).await;
+                    if let Some(reply) = reply {
+                        let _ = reply.send(result);
+                    }
                 }
                 ConsoleCommand::Shutdown => break,
             }
         }
     }
 
-    async fn get_catalog(&mut self) -> Result<ConsoleCatalog> {
-        if let Some(catalog) = &self.catalog {
-            return Ok(catalog.clone());
+    async fn catalog(&mut self) -> Result<&mut Vec<CatalogEntry>> {
+        if self.catalog.is_none() {
+            self.catalog = Some(self.discover_catalog().await?);
         }
-
-        let catalog = self.discover_catalog().await?;
-        self.catalog = Some(catalog.clone());
-        Ok(catalog)
+        Ok(self.catalog.as_mut().expect("catalog was just discovered"))
     }
 
-    async fn discover_catalog(&self) -> Result<ConsoleCatalog> {
+    async fn open(&mut self, path: &str, start: StartAt) -> Result<ConsoleHandle> {
+        let catalog = self.catalog().await?;
+        let position = catalog
+            .iter()
+            .position(|entry| &*entry.path == path)
+            .ok_or_else(|| Error::Console(ConsoleError::UnknownSource(path.to_owned())))?;
+        let id = u8::try_from(position).expect("catalog has at most 255 entries");
+
+        let already_enabled = catalog[position].handles > 0;
+        let entry_path = catalog[position].path.clone();
+        let state = catalog[position].state.clone();
+
+        if !already_enabled {
+            self.set_enabled(id, path, true).await?;
+            self.source_states.lock().await.release(id).await?;
+        }
+
+        // Counted before the handle exists so that its Drop always has a match.
+        self.catalog.as_mut().expect("catalog is known")[position].handles += 1;
+        let release = SourceRelease {
+            id,
+            commands: self.commands.clone(),
+        };
+        Ok(ConsoleHandle::new(entry_path, state, Some(release), start).await)
+    }
+
+    async fn release(&mut self, id: u8) -> Result<()> {
+        let Some(entry) = self
+            .catalog
+            .as_mut()
+            .and_then(|catalog| catalog.get_mut(usize::from(id)))
+        else {
+            return Ok(());
+        };
+        entry.handles -= 1;
+        if entry.handles > 0 {
+            return Ok(());
+        }
+        let path = entry.path.clone();
+        self.set_enabled(id, &path, false).await
+    }
+
+    async fn set_enabled(&self, id: u8, path: &str, enabled: bool) -> Result<()> {
+        match set_enabled_raw(&self.uplink, &self.control_downlink, id, enabled).await? {
+            SetEnabledResponse::Success => Ok(()),
+            SetEnabledResponse::CommandError(errno) => {
+                Err(command_rejected(Some(path), enabled, errno))
+            }
+        }
+    }
+
+    async fn discover_catalog(&self) -> Result<Vec<CatalogEntry>> {
         if self.protocol_version < SOURCED_CONSOLE_PROTOCOL_VERSION {
-            return Ok(ConsoleCatalog::empty());
+            return Ok(Vec::new());
         }
 
         let info = loop {
@@ -716,8 +685,7 @@ impl ConsoleTransactionWorker {
         }
 
         let source_count = data[2];
-        let crc32 = u32::from_le_bytes(data[3..7].try_into()?);
-        let mut sources = Vec::with_capacity(source_count.into());
+        let mut sources: Vec<CatalogEntry> = Vec::with_capacity(source_count.into());
 
         for id in 0..source_count {
             let item = loop {
@@ -742,7 +710,7 @@ impl ConsoleTransactionWorker {
                         continue;
                     }
                     return Err(Error::Console(ConsoleError::CatalogCommandRejected {
-                        operation: ConsoleCatalogOperation::GetItem(ConsoleSourceId(id)),
+                        operation: ConsoleCatalogOperation::GetItem(id),
                         errno: data[1],
                     }));
                 }
@@ -763,18 +731,15 @@ impl ConsoleTransactionWorker {
                     "Sourced Console catalog path has invalid segments".to_owned(),
                 ));
             }
-            if sources
-                .iter()
-                .any(|source: &ConsoleSource| source.path() == path)
-            {
+            if path == STM32_PATH || sources.iter().any(|source| &*source.path == path) {
                 return Err(Error::ProtocolError(
                     "Sourced Console catalog contains a duplicate path".to_owned(),
                 ));
             }
-            sources.push(ConsoleSource {
-                id: ConsoleSourceId(id),
+            sources.push(CatalogEntry {
                 path: Arc::from(path),
                 state: Arc::default(),
+                handles: 0,
             });
         }
 
@@ -783,10 +748,8 @@ impl ConsoleTransactionWorker {
             if registry.closed {
                 return Err(Error::Disconnected);
             }
-            for source in &sources {
-                registry
-                    .states
-                    .insert(source.id.get(), source.state.clone());
+            for (id, source) in (0..source_count).zip(&sources) {
+                registry.states.insert(id, source.state.clone());
             }
             registry.catalog_known = true;
             registry.early_packets.retain(|(id, _)| *id < source_count);
@@ -798,22 +761,7 @@ impl ConsoleTransactionWorker {
                 .sum();
         }
 
-        Ok(ConsoleCatalog {
-            sources: sources.into(),
-            crc32: Some(crc32),
-        })
-    }
-
-    async fn set_enabled(&self, selector: ConsoleSourceSelector, enabled: bool) -> Result<()> {
-        match set_enabled_raw(&self.uplink, &self.control_downlink, selector, enabled).await? {
-            SetEnabledResponse::Success if enabled => {
-                self.source_states.lock().await.release(selector).await
-            }
-            SetEnabledResponse::Success => Ok(()),
-            SetEnabledResponse::CommandError(errno) => {
-                Err(command_rejected(selector, enabled, errno))
-            }
-        }
+        Ok(sources)
     }
 }
 
@@ -847,10 +795,7 @@ impl Drop for ConsoleConstructionGuard {
 ///
 /// See the [console module documentation](crate::subsystems::console) for more context and information.
 pub struct Console {
-    stream_broadcast_receiver: Receiver<String>,
-    console_buffer: Arc<Mutex<String>>,
-    line_broadcast_receiver: Receiver<String>,
-    console_lines: Arc<Mutex<Vec<String>>>,
+    stm32_state: Arc<ConsoleSourceState>,
     command_sender: channel::Sender<ConsoleCommand>,
     console_task: Mutex<Option<JoinHandle<()>>>,
     transaction_task: Mutex<Option<JoinHandle<()>>>,
@@ -862,20 +807,11 @@ impl Console {
         uplink: channel::Sender<Packet>,
         protocol_version: u8,
     ) -> Result<Self> {
-        let (mut stream_broadcast, stream_broadcast_receiver) = broadcast(1000);
-        let console_buffer: Arc<Mutex<String>> = Default::default();
-
-        let (mut line_broadcast, line_broadcast_receiver) = broadcast(1000);
         let (control_sender, control_downlink) = channel::unbounded();
         let (catalog_sender, catalog_downlink) = channel::unbounded();
 
-        // Enable overflow mode so old messages are dropped instead of blocking
-        stream_broadcast.set_overflow(true);
-        line_broadcast.set_overflow(true);
-        let console_lines: Arc<Mutex<Vec<String>>> = Default::default();
-
-        let buffer = console_buffer.clone();
-        let lines = console_lines.clone();
+        let stm32_state: Arc<ConsoleSourceState> = Arc::default();
+        let routed_stm32_state = stm32_state.clone();
         let source_states: Arc<Mutex<ConsoleSourceRegistry>> = Default::default();
         let routed_source_states = source_states.clone();
 
@@ -883,26 +819,10 @@ impl Console {
         // processing sourced data before forwarding a later control response
         // preserves the firmware's successful-disable ordering barrier.
         let console_task = tokio::spawn(async move {
-            let mut line_buffer = String::new();
             while let Ok(packet) = downlink.recv_async().await {
                 match packet.get_channel() {
-                    0 => {
-                        // Decode text from the legacy console.
-                        let text = String::from_utf8_lossy(packet.get_data());
-                        buffer.lock().await.push_str(&text);
-
-                        // Push the text to all active streams, we ignore any error there.
-                        let _ = stream_broadcast.broadcast(text.clone().into_owned()).await;
-
-                        // Extract lines and push them to all active line streams.
-                        line_buffer.push_str(&text);
-                        if let Some((line, rest)) = line_buffer.clone().split_once("\n") {
-                            line_buffer = rest.to_owned();
-                            lines.lock().await.push(line.to_owned().clone());
-                            let _ = line_broadcast.broadcast(line.to_owned()).await;
-                        }
-                    }
-                    1 => {
+                    LOCAL_CHANNEL => routed_stm32_state.push_bytes(packet.get_data()).await,
+                    SOURCED_CHANNEL => {
                         let data = packet.get_data();
                         let Some((&source_id, bytes)) = data.split_first() else {
                             continue;
@@ -924,6 +844,7 @@ impl Console {
                 }
             }
 
+            routed_stm32_state.close().await;
             let states: Vec<_> = {
                 let mut registry = routed_source_states.lock().await;
                 registry.closed = true;
@@ -946,16 +867,14 @@ impl Console {
                 protocol_version,
                 source_states,
                 catalog: None,
+                commands: command_sender.downgrade(),
             }
             .run(command_receiver),
         );
         let console_task = console_task_guard.disarm();
 
         Ok(Self {
-            stream_broadcast_receiver,
-            console_buffer,
-            line_broadcast_receiver,
-            console_lines,
+            stm32_state,
             command_sender,
             console_task: Mutex::new(Some(console_task)),
             transaction_task: Mutex::new(Some(transaction_task)),
@@ -974,104 +893,53 @@ impl Console {
         }
     }
 
-    /// Lazily discovers and caches the immutable sourced-console catalog.
+    /// Returns the path of every console of the connected Crazyflie.
     ///
-    /// Discovery waits and retries both catalog operations when protocol-13
-    /// firmware reports `EAGAIN` during startup. Crazyflies using an older
-    /// protocol return an empty catalog.
-    pub async fn catalog(&self) -> Result<ConsoleCatalog> {
+    /// The list is discovered once and cached. `cf:stm32` is available on every
+    /// firmware version; other consoles require CRTP protocol 13.
+    pub async fn list(&self) -> Result<Vec<String>> {
         let (reply, result) = oneshot::channel();
         self.command_sender
-            .send(ConsoleCommand::GetCatalog { reply })
+            .send(ConsoleCommand::ListPaths { reply })
             .map_err(|_| Error::Disconnected)?;
-        result.await.map_err(|_| Error::Disconnected)?
+        let sources = result.await.map_err(|_| Error::Disconnected)??;
+        Ok(std::iter::once(STM32_PATH.to_owned())
+            .chain(sources)
+            .collect())
     }
 
-    /// Enables one sourced console or every source in the catalog.
+    /// Opens a console, replaying its output since connection before new output.
     ///
-    /// On success, packets held before catalog discovery enter the selected
-    /// sources' histories before this method returns.
-    pub async fn enable(&self, selector: ConsoleSourceSelector) -> Result<()> {
-        self.set_enabled(selector, true).await
+    /// The console is flowing when this returns: there is nothing to start.
+    /// Returns [ConsoleError::UnknownSource] if the Crazyflie has no such console.
+    pub async fn open(&self, path: &str) -> Result<ConsoleHandle> {
+        self.open_at(path, StartAt::History).await
     }
 
-    /// Disables one sourced console or every source in the catalog.
+    /// Version of [Console::open()] that skips anything received before the
+    /// console was opened.
     ///
-    /// On success, every sourced packet ordered before the firmware response
-    /// has been incorporated into its source history. Existing streams may
-    /// still yield such buffered history after this method returns.
-    pub async fn disable(&self, selector: ConsoleSourceSelector) -> Result<()> {
-        self.set_enabled(selector, false).await
+    /// The first text item may finish a character, and the first line may finish
+    /// a line, that began before that point.
+    pub async fn open_live(&self, path: &str) -> Result<ConsoleHandle> {
+        self.open_at(path, StartAt::Live).await
     }
 
-    async fn set_enabled(&self, selector: ConsoleSourceSelector, enabled: bool) -> Result<()> {
-        let catalog = self.catalog().await?;
-        if let ConsoleSourceSelector::Source(id) = selector
-            && catalog.get(id).is_none()
-        {
-            return Err(Error::Console(ConsoleError::UnknownSource(id)));
-        }
-        if catalog.is_empty() {
-            return Ok(());
+    async fn open_at(&self, path: &str, start: StartAt) -> Result<ConsoleHandle> {
+        if path == STM32_PATH {
+            let state = self.stm32_state.clone();
+            return Ok(ConsoleHandle::new(Arc::from(STM32_PATH), state, None, start).await);
         }
 
         let (reply, result) = oneshot::channel();
         self.command_sender
-            .send(ConsoleCommand::SetEnabled {
-                selector,
-                enabled,
+            .send(ConsoleCommand::Open {
+                path: path.to_owned(),
+                start,
                 reply,
             })
             .map_err(|_| Error::Disconnected)?;
         result.await.map_err(|_| Error::Disconnected)?
-    }
-
-    /// Return a [Stream] that generates a [String] each time a console packet
-    /// is received from the Crazyflie.
-    ///
-    /// With the current Crazyflie algorithms, packets are up to 30 character
-    /// long and a new line triggers the send of a packet. Though this is not a
-    /// guarantee and nothing should be expected from this Stream other that
-    /// getting the console data when they are received.
-    ///
-    /// The lib keeps track of the console history since connection, the stream
-    /// will first produce the full history since connection in one String and then
-    /// will start returning Strings as they come from the Crazyflie.
-    pub async fn stream(&self) -> impl Stream<Item = String> + use<> {
-        let buffer = self.console_buffer.lock().await;
-        let history_buffer = buffer.clone();
-        let history_stream = futures::stream::once(async { history_buffer }).boxed();
-
-        history_stream.chain(self.stream_broadcast_receiver.new_receiver())
-    }
-
-    /// Version of [Console::stream()] but that does not produce the history
-    /// first.
-    pub async fn stream_no_history(&self) -> impl Stream<Item = String> + use<> {
-        self.stream_broadcast_receiver.new_receiver()
-    }
-
-    /// Return a [Stream] that generate a [String] each time a line is received
-    /// from the Crazyflie.
-    ///
-    /// This is a useful function if you want to receive the console line by line.
-    /// (for example to print it in a terminal or a file)
-    ///
-    /// Similar to [Console::stream()], this stream will generate first the
-    /// console history since connection. The history is generated by the Stream
-    /// line-by-line.
-    pub async fn line_stream(&self) -> impl Stream<Item = String> + use<> {
-        let lines = self.console_lines.lock().await;
-        let history_lines = lines.clone();
-        let history_stream = futures::stream::iter(history_lines).boxed();
-
-        history_stream.chain(self.line_broadcast_receiver.new_receiver())
-    }
-
-    /// Version of [Console::line_stream()] but that does not produce the history
-    /// first.
-    pub async fn line_stream_no_history(&self) -> impl Stream<Item = String> + use<> {
-        self.line_broadcast_receiver.new_receiver()
     }
 }
 
@@ -1080,28 +948,113 @@ mod tests {
     use super::*;
     use futures::join;
 
-    async fn new_initialized_console(
-        downlink: channel::Receiver<Packet>,
-        uplink: channel::Sender<Packet>,
-        uplink_receiver: &channel::Receiver<Packet>,
-        downlink_sender: &channel::Sender<Packet>,
-    ) -> Console {
-        let firmware = async {
-            let request = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(request.get_channel(), CONTROL_CHANNEL);
-            assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, u8::MAX, 0]);
-            downlink_sender
-                .send_async(Packet::new(
-                    CONSOLE_PORT,
-                    CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, 0, u8::MAX, 0],
-                ))
+    const CAMERA: &str = "deck:bcCam";
+    const NRF: &str = "cf:nRF51";
+    const QUIET: Duration = Duration::from_millis(20);
+    const PATIENCE: Duration = Duration::from_secs(1);
+
+    /// The firmware end of the link.
+    struct Firmware {
+        uplink: channel::Receiver<Packet>,
+        downlink: channel::Sender<Packet>,
+    }
+
+    impl Firmware {
+        async fn send(&self, channel: u8, data: Vec<u8>) {
+            self.downlink
+                .send_async(Packet::new(CONSOLE_PORT, channel, data))
                 .await
                 .unwrap();
-        };
+        }
 
-        let (console, ()) = join!(Console::new(downlink, uplink, 13), firmware);
-        console.unwrap()
+        async fn expect(&self, channel: u8, data: &[u8]) {
+            let request = tokio::time::timeout(PATIENCE, self.uplink.recv_async())
+                .await
+                .expect("the firmware did not receive the expected request")
+                .unwrap();
+            assert_eq!(request.get_channel(), channel);
+            assert_eq!(request.get_data(), data);
+        }
+
+        async fn source_output(&self, id: u8, bytes: &[u8]) {
+            self.send(SOURCED_CHANNEL, [&[id], bytes].concat()).await;
+        }
+
+        async fn answer_catalog(&self, paths: &[&str]) {
+            self.expect(CATALOG_CHANNEL, &[CATALOG_GET_INFO]).await;
+            self.send(
+                CATALOG_CHANNEL,
+                vec![CATALOG_GET_INFO, 0, paths.len() as u8, 0, 0, 0, 0],
+            )
+            .await;
+            for (id, path) in paths.iter().enumerate() {
+                let id = id as u8;
+                self.expect(CATALOG_CHANNEL, &[CATALOG_GET_ITEM, id]).await;
+                self.send(
+                    CATALOG_CHANNEL,
+                    [&[CATALOG_GET_ITEM, 0, id], path.as_bytes()].concat(),
+                )
+                .await;
+            }
+        }
+
+        async fn answer_control(&self, id: u8, enabled: u8) {
+            self.expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, id, enabled])
+                .await;
+            self.send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 0, id, enabled])
+                .await;
+        }
+
+        async fn assert_silent(&self) {
+            assert!(
+                tokio::time::timeout(QUIET, self.uplink.recv_async())
+                    .await
+                    .is_err(),
+                "the firmware received an unexpected request"
+            );
+        }
+    }
+
+    fn link() -> (channel::Receiver<Packet>, channel::Sender<Packet>, Firmware) {
+        let (uplink, uplink_receiver) = channel::unbounded();
+        let (downlink_sender, downlink) = channel::unbounded();
+        (
+            downlink,
+            uplink,
+            Firmware {
+                uplink: uplink_receiver,
+                downlink: downlink_sender,
+            },
+        )
+    }
+
+    async fn connect() -> (Console, Firmware) {
+        let (downlink, uplink, firmware) = link();
+        let answer = firmware.answer_control(ALL_SOURCES, 0);
+        let (console, ()) = join!(Console::new(downlink, uplink, 13), answer);
+        (console.unwrap(), firmware)
+    }
+
+    /// Discovers `catalog` on `console` and opens `path` from it.
+    async fn open_first(
+        console: &Console,
+        firmware: &Firmware,
+        catalog: &[&str],
+        path: &str,
+    ) -> ConsoleHandle {
+        let id = catalog.iter().position(|entry| *entry == path).unwrap() as u8;
+        let answer = async {
+            firmware.answer_catalog(catalog).await;
+            firmware.answer_control(id, 1).await;
+        };
+        let (handle, ()) = join!(console.open(path), answer);
+        handle.unwrap()
+    }
+
+    async fn connect_and_open_camera() -> (Console, Firmware, ConsoleHandle) {
+        let (console, firmware) = connect().await;
+        let handle = open_first(&console, &firmware, &[CAMERA], CAMERA).await;
+        (console, firmware, handle)
     }
 
     async fn assert_router_stopped(downlink_sender: &channel::Sender<Packet>) {
@@ -1115,1262 +1068,543 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn initialization_retains_early_packets_until_the_source_is_enabled() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let construction = Console::new(downlink, uplink, 13);
-        tokio::pin!(construction);
+    async fn list_includes_stm32_and_the_catalog_and_caches_discovery() {
+        let (console, firmware) = connect().await;
 
-        tokio::select! {
-            request = uplink_receiver.recv_async() => {
-                let request = request.unwrap();
-                assert_eq!(request.get_channel(), CONTROL_CHANNEL);
-                assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, u8::MAX, 0]);
-            }
-            _ = construction.as_mut() => {
-                panic!("Console construction returned before initialization");
-            }
-        }
-        assert!(
-            uplink_receiver.try_recv().is_err(),
-            "catalog discovery started before initialization completed"
-        );
+        let (paths, ()) = join!(console.list(), firmware.answer_catalog(&[CAMERA, NRF]));
+        assert_eq!(paths.unwrap(), ["cf:stm32", CAMERA, NRF]);
 
-        for stale in [b"stale one".as_slice(), b"stale two".as_slice()] {
-            downlink_sender
-                .send_async(Packet::new(
-                    CONSOLE_PORT,
-                    1,
-                    [vec![0], stale.to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        }
-        downlink_sender
-            .send_async(Packet::new(
-                CONSOLE_PORT,
-                1,
-                [vec![42], b"unknown".to_vec()].concat(),
-            ))
-            .await
-            .unwrap();
-        downlink_sender
-            .send_async(Packet::new(
-                CONSOLE_PORT,
-                1,
-                [vec![1], b"other source".to_vec()].concat(),
-            ))
-            .await
-            .unwrap();
-        downlink_sender
-            .send_async(Packet::new(
-                CONSOLE_PORT,
-                CONTROL_CHANNEL,
-                vec![CONTROL_SET_ENABLED, 0, u8::MAX, 0],
-            ))
-            .await
-            .unwrap();
-        let console = construction.await.unwrap();
-
-        let discover = async {
-            assert_eq!(
-                uplink_receiver.recv_async().await.unwrap().get_data(),
-                &[CATALOG_GET_INFO]
-            );
-            downlink_sender
-                .send_async(Packet::new(
-                    CONSOLE_PORT,
-                    CATALOG_CHANNEL,
-                    vec![CATALOG_GET_INFO, 0, 2, 0, 0, 0, 0],
-                ))
-                .await
-                .unwrap();
-            assert_eq!(
-                uplink_receiver.recv_async().await.unwrap().get_data(),
-                &[CATALOG_GET_ITEM, 0]
-            );
-            downlink_sender
-                .send_async(Packet::new(
-                    CONSOLE_PORT,
-                    CATALOG_CHANNEL,
-                    [vec![CATALOG_GET_ITEM, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-            assert_eq!(
-                uplink_receiver.recv_async().await.unwrap().get_data(),
-                &[CATALOG_GET_ITEM, 1]
-            );
-            downlink_sender
-                .send_async(Packet::new(
-                    CONSOLE_PORT,
-                    CATALOG_CHANNEL,
-                    [vec![CATALOG_GET_ITEM, 0, 1], b"cf:nRF51".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let catalog = catalog.unwrap();
-        let source = catalog.find("deck:bcCam").unwrap().clone();
-        let other = catalog.find("cf:nRF51").unwrap().clone();
-        let mut bytes = source.byte_stream(ConsoleHistory::Replay).await;
-        let mut other_bytes = other.byte_stream(ConsoleHistory::Replay).await;
-        downlink_sender
-            .send_async(Packet::new(
-                CONSOLE_PORT,
-                1,
-                [vec![0], b"after catalog".to_vec()].concat(),
-            ))
-            .await
-            .unwrap();
-        assert!(
-            tokio::time::timeout(Duration::from_millis(20), bytes.next())
-                .await
-                .is_err(),
-            "early output was visible before the source was enabled"
-        );
-
-        let enable = async {
-            let request = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, 0, 1]);
-            downlink_sender
-                .send_async(Packet::new(
-                    CONSOLE_PORT,
-                    1,
-                    [vec![0], b"before reply".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    CONSOLE_PORT,
-                    CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, 0, 0, 1],
-                ))
-                .await
-                .unwrap();
-        };
-        let (enabled, ()) = join!(console.enable(source.selector()), enable);
-        enabled.unwrap();
-
-        downlink_sender
-            .send_async(Packet::new(
-                CONSOLE_PORT,
-                1,
-                [vec![0], b"fresh".to_vec()].concat(),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(bytes.next().await.unwrap(), b"stale one");
-        assert_eq!(bytes.next().await.unwrap(), b"stale two");
-        assert_eq!(bytes.next().await.unwrap(), b"after catalog");
-        assert_eq!(bytes.next().await.unwrap(), b"before reply");
-        assert_eq!(bytes.next().await.unwrap(), b"fresh");
-        assert!(
-            tokio::time::timeout(Duration::from_millis(20), other_bytes.next())
-                .await
-                .is_err(),
-            "enabling one source released another source's early output"
-        );
-
-        let enable_other = async {
-            let request = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, 1, 1]);
-            downlink_sender
-                .send_async(Packet::new(
-                    CONSOLE_PORT,
-                    CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, 0, 1, 1],
-                ))
-                .await
-                .unwrap();
-        };
-        let (enabled, ()) = join!(console.enable(other.selector()), enable_other);
-        enabled.unwrap();
-        assert_eq!(other_bytes.next().await.unwrap(), b"other source");
+        assert_eq!(console.list().await.unwrap(), ["cf:stm32", CAMERA, NRF]);
+        firmware.assert_silent().await;
     }
 
     #[tokio::test]
-    async fn initialization_retries_eagain_error_response() {
-        let (uplink, uplink_receiver): (channel::Sender<Packet>, channel::Receiver<Packet>) =
-            channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-
-        let firmware = async {
-            for result in [11, 0] {
-                let request = uplink_receiver.recv_async().await.unwrap();
-                assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, u8::MAX, 0]);
-                let response = if result == 0 {
-                    vec![CONTROL_SET_ENABLED, 0, u8::MAX, 0]
-                } else {
-                    vec![CONTROL_SET_ENABLED, result]
-                };
-                downlink_sender
-                    .send_async(Packet::new(CONSOLE_PORT, CONTROL_CHANNEL, response))
-                    .await
-                    .unwrap();
-            }
-        };
-
-        let console = tokio::time::timeout(Duration::from_millis(250), async {
-            let (console, ()) = join!(Console::new(downlink, uplink, 13), firmware);
-            console
-        })
-        .await
-        .expect("Console initialization did not retry EAGAIN")
-        .unwrap();
-        assert!(uplink_receiver.try_recv().is_err());
-        drop(console);
-    }
-
-    #[tokio::test]
-    async fn initialization_rejects_malformed_response_and_stops_router() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-
-        let firmware = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    CONSOLE_PORT,
-                    CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, 0, 0, 0],
-                ))
-                .await
-                .unwrap();
-        };
-        let (result, ()) = join!(Console::new(downlink, uplink, 13), firmware);
-        assert!(matches!(result, Err(Error::ProtocolError(_))));
-        assert_router_stopped(&downlink_sender).await;
-    }
-
-    #[tokio::test]
-    async fn initialization_surfaces_firmware_rejection_and_stops_router() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-
-        let firmware = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    CONSOLE_PORT,
-                    CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, 5],
-                ))
-                .await
-                .unwrap();
-        };
-        let (result, ()) = join!(Console::new(downlink, uplink, 13), firmware);
-        assert!(matches!(
-            result,
-            Err(Error::Console(ConsoleError::CommandRejected {
-                selector: ConsoleSourceSelector::All,
-                enabled: false,
-                errno,
-            })) if errno == 5
-        ));
-        assert_router_stopped(&downlink_sender).await;
-    }
-
-    #[tokio::test]
-    async fn initialization_reports_uplink_closure_and_stops_router() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        drop(uplink_receiver);
-
-        let result = Console::new(downlink, uplink, 13).await;
-        assert!(matches!(result, Err(Error::Disconnected)));
-        assert_router_stopped(&downlink_sender).await;
-    }
-
-    #[tokio::test]
-    async fn initialization_reports_control_downlink_closure() {
-        let (uplink, _uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        drop(downlink_sender);
-
-        let result = Console::new(downlink, uplink, 13).await;
-        assert!(matches!(result, Err(Error::Disconnected)));
-    }
-
-    #[tokio::test]
-    async fn cancelling_initialization_stops_router() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-
-        {
-            let construction = Console::new(downlink, uplink, 13);
-            tokio::pin!(construction);
-            tokio::select! {
-                request = uplink_receiver.recv_async() => {
-                    assert_eq!(
-                        request.unwrap().get_data(),
-                        &[CONTROL_SET_ENABLED, u8::MAX, 0]
-                    );
-                }
-                _ = construction.as_mut() => {
-                    panic!("Console construction returned before initialization");
-                }
-            }
-        }
-
-        assert_router_stopped(&downlink_sender).await;
-    }
-
-    #[tokio::test]
-    async fn catalog_is_discovered_once_and_cached() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let firmware = async {
-            let request = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(request.get_channel(), 3);
-            assert_eq!(request.get_data(), &[1]);
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 2, 0x78, 0x56, 0x34, 0x12]))
-                .await
-                .unwrap();
-
-            for (id, path) in [(0, "deck:bcCam"), (1, "nRF51")] {
-                let request = uplink_receiver.recv_async().await.unwrap();
-                assert_eq!(request.get_channel(), 3);
-                assert_eq!(request.get_data(), &[0, id]);
-
-                let mut response = vec![0, 0, id];
-                response.extend_from_slice(path.as_bytes());
-                downlink_sender
-                    .send_async(Packet::new(0, 3, response))
-                    .await
-                    .unwrap();
-            }
-        };
-
-        let (catalog, ()) = join!(console.catalog(), firmware);
-        let catalog = catalog.unwrap();
-        assert_eq!(catalog.len(), 2);
-        assert_eq!(catalog.crc32(), Some(0x1234_5678));
-        assert_eq!(
-            catalog
-                .get(ConsoleSourceId::new(0).unwrap())
-                .unwrap()
-                .path(),
-            "deck:bcCam"
-        );
-        assert_eq!(catalog.find("nRF51").unwrap().id().get(), 1);
-
-        let cached = console.catalog().await.unwrap();
-        assert_eq!(cached, catalog);
-        assert!(uplink_receiver.try_recv().is_err());
-    }
-
-    #[tokio::test]
-    async fn catalog_waits_and_retries_while_firmware_is_not_ready() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let firmware = async {
-            let first = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(first.get_data(), &[CATALOG_GET_INFO]);
-            downlink_sender
-                .send_async(Packet::new(0, CATALOG_CHANNEL, vec![CATALOG_GET_INFO, 11]))
-                .await
-                .unwrap();
-
-            let retry = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(retry.get_data(), &[CATALOG_GET_INFO]);
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CATALOG_CHANNEL,
-                    vec![CATALOG_GET_INFO, 0, 0, 0, 0, 0, 0],
-                ))
-                .await
-                .unwrap();
-        };
-
-        let result = tokio::time::timeout(Duration::from_millis(250), async {
-            let (catalog, ()) = join!(console.catalog(), firmware);
-            catalog
-        })
-        .await
-        .expect("catalog did not retry its readiness request")
-        .unwrap();
-        assert!(result.is_empty());
-        assert_eq!(result.crc32(), Some(0));
-    }
-
-    #[tokio::test]
-    async fn catalog_retries_items_while_firmware_is_not_ready() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let firmware = async {
-            let info = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(info.get_data(), &[CATALOG_GET_INFO]);
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CATALOG_CHANNEL,
-                    vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0],
-                ))
-                .await
-                .unwrap();
-
-            let first_item = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(first_item.get_data(), &[CATALOG_GET_ITEM, 0]);
-            downlink_sender
-                .send_async(Packet::new(0, CATALOG_CHANNEL, vec![CATALOG_GET_ITEM, 11]))
-                .await
-                .unwrap();
-
-            let retry = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(retry.get_data(), &[CATALOG_GET_ITEM, 0]);
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CATALOG_CHANNEL,
-                    [vec![CATALOG_GET_ITEM, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-
-        let catalog = tokio::time::timeout(Duration::from_millis(250), async {
-            let (catalog, ()) = join!(console.catalog(), firmware);
-            catalog
-        })
-        .await
-        .expect("catalog did not retry the item readiness response")
-        .unwrap();
-        assert_eq!(catalog.find("deck:bcCam").unwrap().id().get(), 0);
-    }
-
-    #[tokio::test]
-    async fn cancelling_catalog_discovery_does_not_desynchronize_later_discovery() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        {
-            let discovery = console.catalog();
-            tokio::pin!(discovery);
-            tokio::select! {
-                request = uplink_receiver.recv_async() => {
-                    assert_eq!(request.unwrap().get_data(), &[CATALOG_GET_INFO]);
-                }
-                result = discovery.as_mut() => {
-                    panic!("catalog returned before sending its request: {result:?}");
-                }
-            }
-        }
-
-        downlink_sender
-            .send_async(Packet::new(
-                0,
-                CATALOG_CHANNEL,
-                vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0],
-            ))
-            .await
-            .unwrap();
-
-        let firmware = async {
-            let item = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(item.get_data(), &[CATALOG_GET_ITEM, 0]);
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CATALOG_CHANNEL,
-                    [vec![CATALOG_GET_ITEM, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-
-        let catalog = tokio::time::timeout(Duration::from_millis(250), async {
-            let (catalog, ()) = join!(console.catalog(), firmware);
-            catalog
-        })
-        .await
-        .expect("cancelled discovery did not continue in the background")
-        .unwrap();
-        assert_eq!(catalog.find("deck:bcCam").unwrap().id().get(), 0);
-        assert!(uplink_receiver.try_recv().is_err());
-    }
-
-    #[tokio::test]
-    async fn catalog_rejects_a_path_with_an_empty_segment() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let firmware = async {
-            assert_eq!(
-                uplink_receiver.recv_async().await.unwrap().get_data(),
-                &[CATALOG_GET_INFO]
-            );
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            assert_eq!(
-                uplink_receiver.recv_async().await.unwrap().get_data(),
-                &[CATALOG_GET_ITEM, 0]
-            );
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    vec![0, 0, 0, b'd', b'e', b'c', b'k', b':'],
-                ))
-                .await
-                .unwrap();
-        };
-
-        let (catalog, ()) = join!(console.catalog(), firmware);
-        assert!(matches!(catalog, Err(Error::ProtocolError(_))));
-    }
-
-    #[tokio::test]
-    async fn catalog_rejects_duplicate_paths() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let firmware = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 2, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            for id in 0..2 {
-                let _ = uplink_receiver.recv_async().await.unwrap();
-                downlink_sender
-                    .send_async(Packet::new(
-                        0,
-                        3,
-                        [vec![0, 0, id], b"deck:duplicate".to_vec()].concat(),
-                    ))
-                    .await
-                    .unwrap();
-            }
-        };
-
-        let (catalog, ()) = join!(console.catalog(), firmware);
-        assert!(matches!(catalog, Err(Error::ProtocolError(_))));
-    }
-
-    #[tokio::test]
-    async fn catalog_reports_command_error_responses() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let firmware = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let item = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(item.get_data(), &[CATALOG_GET_ITEM, 0]);
-            downlink_sender
-                .send_async(Packet::new(0, CATALOG_CHANNEL, vec![CATALOG_GET_ITEM, 2]))
-                .await
-                .unwrap();
-        };
-
-        let (catalog, ()) = join!(console.catalog(), firmware);
-        assert!(matches!(
-            catalog,
-            Err(Error::Console(ConsoleError::CatalogCommandRejected {
-                operation: ConsoleCatalogOperation::GetItem(id),
-                errno,
-            })) if id.get() == 0 && errno == 2
-        ));
-    }
-
-    #[tokio::test]
-    async fn enable_reports_the_firmware_errno() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let discover = async {
-            assert_eq!(uplink_receiver.recv_async().await.unwrap().get_data(), &[1]);
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            assert_eq!(
-                uplink_receiver.recv_async().await.unwrap().get_data(),
-                &[0, 0]
-            );
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
-
-        let firmware = async {
-            let request = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(request.get_channel(), 2);
-            assert_eq!(request.get_data(), &[0, 0, 1]);
-            downlink_sender
-                .send_async(Packet::new(0, 2, vec![0, 5]))
-                .await
-                .unwrap();
-        };
-
-        let (result, ()) = join!(console.enable(source.selector()), firmware);
-        assert!(matches!(
-            result,
-            Err(Error::Console(ConsoleError::CommandRejected {
-                selector: ConsoleSourceSelector::Source(id),
-                enabled: true,
-                errno,
-            })) if id == source.id() && errno == 5
-        ));
-    }
-
-    #[tokio::test]
-    async fn protocol_12_has_an_empty_catalog_and_all_control_is_a_noop() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (_downlink_sender, downlink) = channel::unbounded();
+    async fn protocol_12_lists_only_stm32_and_sends_nothing() {
+        let (downlink, uplink, firmware) = link();
         let console = Console::new(downlink, uplink, 12).await.unwrap();
 
-        let catalog = console.catalog().await.unwrap();
-        assert!(catalog.is_empty());
-        assert_eq!(catalog.crc32(), None);
-        console.enable(catalog.all()).await.unwrap();
-        console.disable(catalog.all()).await.unwrap();
-        assert!(uplink_receiver.try_recv().is_err());
+        assert_eq!(console.list().await.unwrap(), ["cf:stm32"]);
+        firmware.assert_silent().await;
+    }
+
+    #[tokio::test]
+    async fn stm32_works_on_protocol_12_and_assembles_several_lines_per_packet() {
+        let (downlink, uplink, firmware) = link();
+        let console = Console::new(downlink, uplink, 12).await.unwrap();
+
+        firmware
+            .send(LOCAL_CHANNEL, b"first\nsecond\npar".to_vec())
+            .await;
+        let mut stm32 = console.open("cf:stm32").await.unwrap();
+        assert_eq!(stm32.path(), "cf:stm32");
+        firmware.send(LOCAL_CHANNEL, b"tial\n".to_vec()).await;
+
+        let mut lines = stm32.lines();
+        assert_eq!(lines.next().await.unwrap(), "first");
+        assert_eq!(lines.next().await.unwrap(), "second");
+        assert_eq!(lines.next().await.unwrap(), "partial");
+    }
+
+    #[tokio::test]
+    async fn stm32_cannot_be_disabled_so_closing_sends_nothing() {
+        let (console, firmware) = connect().await;
+
+        console
+            .open("cf:stm32")
+            .await
+            .unwrap()
+            .close()
+            .await
+            .unwrap();
+        drop(console.open("cf:stm32").await.unwrap());
+        firmware.assert_silent().await;
+
+        firmware.send(LOCAL_CHANNEL, b"kept\n".to_vec()).await;
+        let mut reopened = console.open("cf:stm32").await.unwrap();
+        assert_eq!(reopened.lines().next().await.unwrap(), "kept");
+    }
+
+    #[tokio::test]
+    async fn opening_stm32_does_not_wait_for_catalog_discovery() {
+        let (console, firmware) = connect().await;
+
+        let discovery = console.list();
+        tokio::pin!(discovery);
+        tokio::select! {
+            () = firmware.expect(CATALOG_CHANNEL, &[CATALOG_GET_INFO]) => {}
+            result = discovery.as_mut() => panic!("list returned early: {result:?}"),
+        }
+
+        tokio::time::timeout(PATIENCE, console.open("cf:stm32"))
+            .await
+            .expect("cf:stm32 waited for the catalog")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn firmware_cannot_redefine_the_stm32_path() {
+        let (console, firmware) = connect().await;
+
+        let (paths, ()) = join!(console.list(), firmware.answer_catalog(&["cf:stm32"]));
+        assert!(matches!(paths, Err(Error::ProtocolError(_))));
+    }
+
+    #[tokio::test]
+    async fn opening_needs_no_start_and_reports_unknown_paths_without_traffic() {
+        let (console, firmware) = connect().await;
+
+        let (result, ()) = join!(
+            console.open("deck:other"),
+            firmware.answer_catalog(&[CAMERA])
+        );
+        assert!(matches!(
+            result,
+            Err(Error::Console(ConsoleError::UnknownSource(path))) if path == "deck:other"
+        ));
+        firmware.assert_silent().await;
+
+        let (camera, ()) = join!(console.open(CAMERA), firmware.answer_control(0, 1));
+        let mut camera = camera.unwrap();
+        firmware.source_output(0, b"hello\n").await;
+        assert_eq!(camera.lines().next().await.unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn dropping_the_handle_disables_the_source() {
+        let (_console, firmware, camera) = connect_and_open_camera().await;
+
+        drop(camera);
+        firmware.answer_control(0, 0).await;
+    }
+
+    #[tokio::test]
+    async fn close_waits_for_the_firmware_and_reports_its_errors() {
+        let (_console, firmware, camera) = connect_and_open_camera().await;
+
+        let answer = async {
+            firmware
+                .expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, 0, 0])
+                .await;
+            firmware
+                .send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 5])
+                .await;
+        };
+        let (result, ()) = join!(camera.close(), answer);
+        assert!(matches!(
+            result,
+            Err(Error::Console(ConsoleError::CommandRejected {
+                path: Some(path),
+                enabled: false,
+                errno: 5,
+            })) if path == CAMERA
+        ));
+    }
+
+    #[tokio::test]
+    async fn close_does_not_also_send_the_drop_disable() {
+        let (_console, firmware, camera) = connect_and_open_camera().await;
+
+        let (result, ()) = join!(camera.close(), firmware.answer_control(0, 0));
+        result.unwrap();
+        firmware.assert_silent().await;
+    }
+
+    #[tokio::test]
+    async fn source_stays_enabled_until_its_last_handle_is_gone() {
+        let (console, firmware, first) = connect_and_open_camera().await;
+
+        let mut second = console.open(CAMERA).await.unwrap();
+        let third = console.open(CAMERA).await.unwrap();
+        firmware.assert_silent().await;
+
+        first.close().await.unwrap();
+        drop(third);
+        firmware.assert_silent().await;
+
+        firmware.source_output(0, b"still flowing\n").await;
+        assert_eq!(second.lines().next().await.unwrap(), "still flowing");
+
+        let (result, ()) = join!(second.close(), firmware.answer_control(0, 0));
+        result.unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_opens_of_one_source_enable_it_once() {
+        let (console, firmware) = connect().await;
+        let (paths, ()) = join!(console.list(), firmware.answer_catalog(&[CAMERA]));
+        paths.unwrap();
+
+        let (first, second, ()) = join!(
+            console.open(CAMERA),
+            console.open(CAMERA),
+            firmware.answer_control(0, 1)
+        );
+        first.unwrap();
+        second.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_enable_leaves_the_source_closed() {
+        let (console, firmware) = connect().await;
+
+        let answer = async {
+            firmware.answer_catalog(&[CAMERA]).await;
+            firmware
+                .expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, 0, 1])
+                .await;
+            firmware
+                .send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 22])
+                .await;
+        };
+        let (result, ()) = join!(console.open(CAMERA), answer);
+        assert!(matches!(
+            result,
+            Err(Error::Console(ConsoleError::CommandRejected {
+                path: Some(path),
+                enabled: true,
+                errno: 22,
+            })) if path == CAMERA
+        ));
+
+        // No disable for the failed open, and the next open enables again.
+        let (retry, ()) = join!(console.open(CAMERA), firmware.answer_control(0, 1));
+        retry.unwrap();
+    }
+
+    #[tokio::test]
+    async fn drop_then_immediate_open_keeps_the_source_enabled_in_order() {
+        let (console, firmware, camera) = connect_and_open_camera().await;
+
+        drop(camera);
+        let answer = async {
+            firmware.answer_control(0, 0).await;
+            firmware.answer_control(0, 1).await;
+        };
+        let (reopened, ()) = join!(console.open(CAMERA), answer);
+        reopened.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reopening_replays_history_and_open_live_skips_it() {
+        let (console, firmware, mut camera) = connect_and_open_camera().await;
+        firmware.source_output(0, b"old\n").await;
+        assert_eq!(camera.lines().next().await.unwrap(), "old");
+
+        let (closed, ()) = join!(camera.close(), firmware.answer_control(0, 0));
+        closed.unwrap();
+
+        let (replay, ()) = join!(console.open(CAMERA), firmware.answer_control(0, 1));
+        let mut replay = replay.unwrap();
+        let mut live = console.open_live(CAMERA).await.unwrap();
+        firmware.source_output(0, b"new\n").await;
+
+        let mut replayed = replay.lines();
+        assert_eq!(replayed.next().await.unwrap(), "old");
+        assert_eq!(replayed.next().await.unwrap(), "new");
+        assert_eq!(live.lines().next().await.unwrap(), "new");
+    }
+
+    #[tokio::test]
+    async fn handles_read_independently() {
+        let (console, firmware, mut first) = connect_and_open_camera().await;
+        let mut second = console.open(CAMERA).await.unwrap();
+
+        firmware.source_output(0, b"a\nb\n").await;
+        assert_eq!(first.lines().next().await.unwrap(), "a");
+        assert_eq!(second.lines().next().await.unwrap(), "a");
+        assert_eq!(first.lines().next().await.unwrap(), "b");
+        assert_eq!(second.lines().next().await.unwrap(), "b");
+    }
+
+    #[tokio::test]
+    async fn recreating_a_stream_neither_loses_nor_repeats_output() {
+        let (_console, firmware, mut camera) = connect_and_open_camera().await;
+
+        firmware.source_output(0, b"one\ntwo\nthree\n").await;
+        assert_eq!(camera.lines().next().await.unwrap(), "one");
+        assert_eq!(camera.lines().next().await.unwrap(), "two");
+        assert!(
+            tokio::time::timeout(QUIET, async {
+                let mut lines = camera.lines();
+                assert_eq!(lines.next().await.unwrap(), "three");
+                lines.next().await
+            })
+            .await
+            .is_err(),
+            "the stream produced output that was never sent"
+        );
+
+        firmware.source_output(0, b"four\n").await;
+        assert_eq!(camera.lines().next().await.unwrap(), "four");
+    }
+
+    #[tokio::test]
+    async fn views_keep_separate_positions() {
+        let (_console, firmware, mut camera) = connect_and_open_camera().await;
+
+        firmware.source_output(0, b"line\n").await;
+        assert_eq!(camera.bytes().next().await.unwrap(), b"line\n");
+        assert_eq!(camera.text().next().await.unwrap(), "line\n");
+        assert_eq!(camera.lines().next().await.unwrap(), "line");
+    }
+
+    #[tokio::test]
+    async fn cancelled_open_does_not_leave_the_source_enabled() {
+        let (console, firmware) = connect().await;
+        let (paths, ()) = join!(console.list(), firmware.answer_catalog(&[CAMERA]));
+        paths.unwrap();
+
+        {
+            let open = console.open(CAMERA);
+            tokio::pin!(open);
+            tokio::select! {
+                () = firmware.expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, 0, 1]) => {}
+                result = open.as_mut() => panic!("open returned early: {result:?}"),
+            }
+        }
+        firmware
+            .send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 0, 0, 1])
+            .await;
+
+        firmware.answer_control(0, 0).await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_close_still_disables_the_source() {
+        let (console, firmware, camera) = connect_and_open_camera().await;
+
+        {
+            let close = camera.close();
+            tokio::pin!(close);
+            tokio::select! {
+                () = firmware.expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, 0, 0]) => {}
+                result = close.as_mut() => panic!("close returned early: {result:?}"),
+            }
+        }
+        firmware
+            .send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 0, 0, 0])
+            .await;
+
+        let (reopened, ()) = join!(console.open(CAMERA), firmware.answer_control(0, 1));
+        reopened.unwrap();
     }
 
     #[tokio::test]
     async fn control_commands_are_serialized() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
+        let (console, firmware) = connect().await;
+        let (paths, ()) = join!(console.list(), firmware.answer_catalog(&[CAMERA, NRF]));
+        paths.unwrap();
 
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let catalog = catalog.unwrap();
-        let source = catalog.find("deck:bcCam").unwrap().selector();
-
-        let firmware = async {
-            let first = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(first.get_data(), &[0, 0, 1]);
-            assert!(uplink_receiver.try_recv().is_err());
-            downlink_sender
-                .send_async(Packet::new(0, 2, vec![0, 0, 0, 1]))
-                .await
-                .unwrap();
-
-            let second = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(second.get_data(), &[0, u8::MAX, 0]);
-            downlink_sender
-                .send_async(Packet::new(0, 2, vec![0, 0, u8::MAX, 0]))
-                .await
-                .unwrap();
-        };
-
-        let (enabled, disabled, ()) = join!(
-            console.enable(source),
-            console.disable(catalog.all()),
+        let answer = async {
             firmware
-        );
-        enabled.unwrap();
-        disabled.unwrap();
+                .expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, 0, 1])
+                .await;
+            firmware.assert_silent().await;
+            firmware
+                .send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 0, 0, 1])
+                .await;
+            firmware.answer_control(1, 1).await;
+        };
+        let (first, second, ()) = join!(console.open(CAMERA), console.open(NRF), answer);
+        first.unwrap();
+        second.unwrap();
     }
 
     #[tokio::test]
-    async fn disable_waits_until_earlier_source_packets_are_processed() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
+    async fn close_waits_until_earlier_source_packets_are_processed() {
+        let (_console, firmware, camera) = connect_and_open_camera().await;
+        let state = camera.state.clone();
 
-        let discover = async {
-            let request = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(request.get_data(), &[CATALOG_GET_INFO]);
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CATALOG_CHANNEL,
-                    vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0],
-                ))
-                .await
-                .unwrap();
-            let request = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(request.get_data(), &[CATALOG_GET_ITEM, 0]);
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CATALOG_CHANNEL,
-                    [vec![CATALOG_GET_ITEM, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
+        let history_guard = state.history.lock().await;
+        let answer = async {
+            firmware
+                .expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, 0, 0])
+                .await;
+            firmware.source_output(0, b"before disable\n").await;
+            firmware
+                .send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 0, 0, 0])
+                .await;
         };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let source = catalog.unwrap().get(ConsoleSourceId(0)).unwrap().clone();
-        let selector = source.selector();
-
-        let history_guard = source.state.history.lock().await;
-        let firmware = async {
-            let request = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(request.get_data(), &[CONTROL_SET_ENABLED, 0, 0]);
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    1,
-                    [vec![0], b"before disable\n".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, 0, 0, 0],
-                ))
-                .await
-                .unwrap();
-        };
-        let disable = console.disable(selector);
-        tokio::pin!(disable);
-        tokio::pin!(firmware);
+        let close = camera.close();
+        tokio::pin!(close);
+        tokio::pin!(answer);
 
         tokio::select! {
-            () = firmware.as_mut() => {}
-            result = disable.as_mut() => {
-                panic!("disable returned before the firmware response was sent: {result:?}");
-            }
+            () = answer.as_mut() => {}
+            result = close.as_mut() => panic!("close returned too early: {result:?}"),
         }
         assert!(
-            tokio::time::timeout(Duration::from_millis(20), disable.as_mut())
-                .await
-                .is_err(),
-            "disable returned before the earlier source packet was processed"
+            tokio::time::timeout(QUIET, close.as_mut()).await.is_err(),
+            "close returned before the earlier source packet was processed"
         );
 
         drop(history_guard);
-        tokio::time::timeout(Duration::from_secs(1), disable)
+        tokio::time::timeout(PATIENCE, close)
             .await
-            .expect("disable did not finish after source processing resumed")
+            .expect("close did not finish after source processing resumed")
             .unwrap();
-
-        let mut live = source.line_stream(ConsoleHistory::Live).await;
-        assert!(
-            tokio::time::timeout(Duration::from_millis(20), live.next())
-                .await
-                .is_err(),
-            "a pre-disable packet appeared in a stream created after disable returned"
-        );
+        assert_eq!(state.history.lock().await.lines, ["before disable"]);
     }
 
     #[tokio::test]
-    async fn cancelling_control_does_not_desynchronize_the_next_command() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
+    async fn early_output_enters_history_when_its_source_is_first_opened() {
+        let (downlink, uplink, firmware) = link();
+        let construction = Console::new(downlink, uplink, 13);
+        tokio::pin!(construction);
+        tokio::select! {
+            () = firmware.expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, ALL_SOURCES, 0]) => {}
+            _ = construction.as_mut() => panic!("Console returned before initialization"),
+        }
+        assert!(
+            firmware.uplink.try_recv().is_err(),
+            "catalog discovery started before initialization completed"
+        );
 
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
+        firmware.source_output(0, b"stale one").await;
+        firmware.source_output(0, b"stale two").await;
+        firmware.source_output(42, b"unknown").await;
+        firmware.source_output(1, b"other source").await;
+        firmware
+            .send(
+                CONTROL_CHANNEL,
+                vec![CONTROL_SET_ENABLED, 0, ALL_SOURCES, 0],
+            )
+            .await;
+        let console = construction.await.unwrap();
+
+        let (paths, ()) = join!(console.list(), firmware.answer_catalog(&[CAMERA, NRF]));
+        paths.unwrap();
+        firmware.source_output(0, b"after catalog").await;
+
+        let answer = async {
+            firmware
+                .expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, 0, 1])
+                .await;
+            firmware.source_output(0, b"before reply").await;
+            firmware
+                .send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 0, 0, 1])
+                .await;
         };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let selector = catalog.unwrap().find("deck:bcCam").unwrap().selector();
+        let (camera, ()) = join!(console.open(CAMERA), answer);
+        let mut camera = camera.unwrap();
+        firmware.source_output(0, b"fresh").await;
 
-        {
-            let enable = console.enable(selector);
-            tokio::pin!(enable);
-            tokio::select! {
-                request = uplink_receiver.recv_async() => {
-                    assert_eq!(request.unwrap().get_data(), &[CONTROL_SET_ENABLED, 0, 1]);
-                }
-                result = enable.as_mut() => {
-                    panic!("enable returned before the firmware response: {result:?}");
-                }
-            }
+        let mut bytes = camera.bytes();
+        for expected in [
+            b"stale one".as_slice(),
+            b"stale two",
+            b"after catalog",
+            b"before reply",
+            b"fresh",
+        ] {
+            assert_eq!(bytes.next().await.unwrap(), expected);
         }
 
-        downlink_sender
-            .send_async(Packet::new(
-                0,
-                CONTROL_CHANNEL,
-                vec![CONTROL_SET_ENABLED, 0, 0, 1],
-            ))
-            .await
-            .unwrap();
-
-        let firmware = async {
-            let disable = uplink_receiver.recv_async().await.unwrap();
-            assert_eq!(disable.get_data(), &[CONTROL_SET_ENABLED, 0, 0]);
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, 0, 0, 0],
-                ))
-                .await
-                .unwrap();
-        };
-
-        let (disabled, ()) = tokio::time::timeout(Duration::from_millis(250), async {
-            join!(console.disable(selector), firmware)
-        })
-        .await
-        .expect("control worker did not finish the cancelled transaction");
-        disabled.unwrap();
+        let (nrf, ()) = join!(console.open(NRF), firmware.answer_control(1, 1));
+        assert_eq!(nrf.unwrap().bytes().next().await.unwrap(), b"other source");
     }
 
     #[tokio::test]
-    async fn control_rejects_unknown_sources_without_sending_a_packet() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
+    async fn open_live_skips_early_output() {
+        let (console, firmware) = connect().await;
+        firmware.source_output(0, b"early").await;
 
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 0, 0, 0, 0, 0]))
-                .await
-                .unwrap();
+        let answer = async {
+            firmware.answer_catalog(&[CAMERA]).await;
+            firmware.answer_control(0, 1).await;
         };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        assert!(catalog.unwrap().is_empty());
+        let (camera, ()) = join!(console.open_live(CAMERA), answer);
+        let mut camera = camera.unwrap();
 
-        let unknown = ConsoleSourceId::new(42).unwrap();
-        assert!(matches!(
-            console
-                .enable(ConsoleSourceSelector::Source(unknown))
-                .await,
-            Err(Error::Console(ConsoleError::UnknownSource(id))) if id == unknown
-        ));
-        assert!(uplink_receiver.try_recv().is_err());
+        firmware.source_output(0, b"fresh").await;
+        assert_eq!(camera.bytes().next().await.unwrap(), b"fresh");
     }
 
     #[tokio::test]
-    async fn malformed_control_responses_are_protocol_errors() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
+    async fn early_output_buffer_drops_the_oldest_packets_when_full() {
+        let (console, firmware) = connect().await;
 
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let selector = catalog.unwrap().find("deck:bcCam").unwrap().selector();
+        let packet_count = EARLY_SOURCE_BUFFER_LIMIT / (28 + 32) + 10;
+        for value in 0..packet_count {
+            let mut data = (value as u32).to_le_bytes().to_vec();
+            data.resize(28, 0);
+            firmware.source_output(0, &data).await;
+        }
 
-        let firmware = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 2, vec![0, 0, 0, 0]))
-                .await
-                .unwrap();
-        };
-        let (result, ()) = join!(console.enable(selector), firmware);
-        assert!(matches!(result, Err(Error::ProtocolError(_))));
+        let mut camera = open_first(&console, &firmware, &[CAMERA], CAMERA).await;
+        firmware.source_output(0, b"end").await;
+
+        let mut received = Vec::new();
+        let mut bytes = camera.bytes();
+        loop {
+            let chunk = bytes.next().await.unwrap();
+            if chunk == b"end" {
+                break;
+            }
+            received.push(u32::from_le_bytes(chunk[..4].try_into().unwrap()));
+        }
+        assert!(received.len() < packet_count);
+        assert_eq!(*received.last().unwrap() as usize, packet_count - 1);
     }
 
     #[tokio::test]
-    async fn short_control_error_responses_preserve_the_errno() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
+    async fn text_decodes_utf8_across_packets() {
+        let (_console, firmware, mut camera) = connect_and_open_camera().await;
 
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let selector = catalog.unwrap().find("deck:bcCam").unwrap().selector();
+        firmware.source_output(0, &[b'a', 0xe2]).await;
+        firmware.source_output(0, &[0x82, 0xac, b'b']).await;
 
-        let firmware = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    CONTROL_CHANNEL,
-                    vec![CONTROL_SET_ENABLED, 22],
-                ))
-                .await
-                .unwrap();
-        };
-        let (result, ()) = join!(console.enable(selector), firmware);
-        assert!(matches!(
-            result,
-            Err(Error::Console(ConsoleError::CommandRejected {
-                selector: rejected,
-                enabled: true,
-                errno,
-            })) if rejected == selector && errno == 22
-        ));
-    }
-
-    #[tokio::test]
-    async fn byte_stream_replays_history_then_continues_live() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let discover = async {
-            assert_eq!(uplink_receiver.recv_async().await.unwrap().get_data(), &[1]);
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            assert_eq!(
-                uplink_receiver.recv_async().await.unwrap().get_data(),
-                &[0, 0]
-            );
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
-
-        downlink_sender
-            .send_async(Packet::new(0, 1, [vec![0], b"retained ".to_vec()].concat()))
-            .await
-            .unwrap();
-        let mut bytes = source.byte_stream(ConsoleHistory::Replay).await;
-        assert_eq!(bytes.next().await.unwrap(), b"retained ");
-
-        downlink_sender
-            .send_async(Packet::new(0, 1, [vec![0], b"live".to_vec()].concat()))
-            .await
-            .unwrap();
-        assert_eq!(bytes.next().await.unwrap(), b"live");
-    }
-
-    #[tokio::test]
-    async fn text_stream_decodes_utf8_across_packets() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
-        let mut text = source.text_stream(ConsoleHistory::Live).await;
-
-        downlink_sender
-            .send_async(Packet::new(0, 1, vec![0, b'a', 0xe2]))
-            .await
-            .unwrap();
-        downlink_sender
-            .send_async(Packet::new(0, 1, vec![0, 0x82, 0xac, b'b']))
-            .await
-            .unwrap();
-
+        let mut text = camera.text();
         assert_eq!(text.next().await.unwrap(), "a");
         assert_eq!(text.next().await.unwrap(), "€b");
     }
 
     #[tokio::test]
-    async fn line_streams_assemble_multiple_lines_independently_per_source() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
+    async fn text_is_lossy() {
+        let (_console, firmware, mut camera) = connect_and_open_camera().await;
 
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 2, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            for (id, path) in [(0, "deck:bcCam"), (1, "cf:nRF51")] {
-                let _ = uplink_receiver.recv_async().await.unwrap();
-                downlink_sender
-                    .send_async(Packet::new(
-                        0,
-                        3,
-                        [vec![0, 0, id], path.as_bytes().to_vec()].concat(),
-                    ))
-                    .await
-                    .unwrap();
-            }
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let catalog = catalog.unwrap();
-        let camera = catalog.find("deck:bcCam").unwrap();
-        let nrf = catalog.find("cf:nRF51").unwrap();
-        let mut camera_lines = camera.line_stream(ConsoleHistory::Live).await;
-        let mut nrf_lines = nrf.line_stream(ConsoleHistory::Live).await;
+        firmware.source_output(0, &[b'o', b'k', 0xff]).await;
+        assert_eq!(camera.text().next().await.unwrap(), "ok�");
+    }
 
-        for data in [
-            [vec![0], b"cam ".to_vec()].concat(),
-            [vec![1], b"nrf\n".to_vec()].concat(),
-            [vec![0], b"line\nsecond\npartial".to_vec()].concat(),
-        ] {
-            downlink_sender
-                .send_async(Packet::new(0, 1, data))
-                .await
-                .unwrap();
-        }
+    #[tokio::test]
+    async fn stm32_text_decodes_utf8_across_packets() {
+        let (console, firmware) = connect().await;
+        let mut stm32 = console.open("cf:stm32").await.unwrap();
 
-        assert_eq!(nrf_lines.next().await.unwrap(), "nrf");
+        firmware.send(LOCAL_CHANNEL, vec![b'a', 0xe2]).await;
+        firmware.send(LOCAL_CHANNEL, vec![0x82, 0xac]).await;
+
+        let mut text = stm32.text();
+        assert_eq!(text.next().await.unwrap(), "a");
+        assert_eq!(text.next().await.unwrap(), "€");
+    }
+
+    #[tokio::test]
+    async fn lines_are_assembled_independently_per_source() {
+        let (console, firmware) = connect().await;
+        let mut camera = open_first(&console, &firmware, &[CAMERA, NRF], CAMERA).await;
+        let (nrf, ()) = join!(console.open(NRF), firmware.answer_control(1, 1));
+        let mut nrf = nrf.unwrap();
+
+        firmware.source_output(0, b"cam ").await;
+        firmware.source_output(1, b"nrf\n").await;
+        firmware.source_output(0, b"line\nsecond\npartial").await;
+
+        assert_eq!(nrf.lines().next().await.unwrap(), "nrf");
+        let mut camera_lines = camera.lines();
         assert_eq!(camera_lines.next().await.unwrap(), "cam line");
         assert_eq!(camera_lines.next().await.unwrap(), "second");
     }
 
     #[tokio::test]
-    async fn text_stream_flushes_incomplete_utf8_and_ends_on_disconnect() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
-        let mut text = source.text_stream(ConsoleHistory::Live).await;
-
-        downlink_sender
-            .send_async(Packet::new(0, 1, vec![0, 0xe2]))
-            .await
-            .unwrap();
-        drop(downlink_sender);
-
-        assert_eq!(text.next().await.unwrap(), "�");
-        assert_eq!(text.next().await, None);
-    }
-
-    #[tokio::test]
-    async fn shutdown_waits_for_source_streams_to_close() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
-        let mut bytes = source.byte_stream(ConsoleHistory::Live).await;
-        let mut text = source.text_stream(ConsoleHistory::Live).await;
-        let mut lines = source.line_stream(ConsoleHistory::Live).await;
-
-        drop(downlink_sender);
-        tokio::time::timeout(Duration::from_secs(1), console.shutdown())
-            .await
-            .expect("Console shutdown did not join its router task");
-
-        tokio::time::timeout(Duration::from_secs(1), async {
-            assert_eq!(bytes.next().await, None);
-            assert_eq!(text.next().await, None);
-            assert_eq!(lines.next().await, None);
-        })
-        .await
-        .expect("source streams did not close after shutdown");
-        assert!(console.console_task.lock().await.is_none());
-        assert!(console.transaction_task.lock().await.is_none());
-    }
-
-    #[tokio::test]
-    async fn text_stream_is_lossy_and_live_does_not_replay_history() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
-
-        downlink_sender
-            .send_async(Packet::new(0, 1, vec![0, b'o', b'l', b'd', 0xff]))
-            .await
-            .unwrap();
-        let mut replay = source.text_stream(ConsoleHistory::Replay).await;
-        assert_eq!(replay.next().await.unwrap(), "old�");
-
-        let mut live = source.text_stream(ConsoleHistory::Live).await;
-        downlink_sender
-            .send_async(Packet::new(0, 1, [vec![0], b"new".to_vec()].concat()))
-            .await
-            .unwrap();
-        assert_eq!(live.next().await.unwrap(), "new");
-    }
-
-    #[tokio::test]
-    async fn slow_byte_consumer_keeps_its_connection_history_cursor() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
-        let mut bytes = source.byte_stream(ConsoleHistory::Live).await;
+    async fn slow_reader_keeps_its_position() {
+        let (_console, firmware, mut camera) = connect_and_open_camera().await;
 
         for value in 0..1100_u16 {
-            downlink_sender
-                .send_async(Packet::new(0, 1, vec![0, (value % 251) as u8]))
-                .await
-                .unwrap();
+            firmware.source_output(0, &[(value % 251) as u8]).await;
         }
+        let mut bytes = camera.bytes();
         for value in 0..1100_u16 {
             assert_eq!(bytes.next().await.unwrap(), vec![(value % 251) as u8]);
         }
@@ -2378,83 +1612,333 @@ mod tests {
 
     #[tokio::test]
     async fn packets_from_unknown_source_ids_are_ignored() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
+        let (_console, firmware, mut camera) = connect_and_open_camera().await;
 
-        let discover = async {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-        };
-        let (catalog, ()) = join!(console.catalog(), discover);
-        let source = catalog.unwrap().find("deck:bcCam").unwrap().clone();
-        let mut bytes = source.byte_stream(ConsoleHistory::Live).await;
-
-        downlink_sender
-            .send_async(Packet::new(0, 1, [vec![42], b"wrong".to_vec()].concat()))
-            .await
-            .unwrap();
-        downlink_sender
-            .send_async(Packet::new(0, 1, [vec![0], b"right".to_vec()].concat()))
-            .await
-            .unwrap();
-        assert_eq!(bytes.next().await.unwrap(), b"right");
+        firmware.source_output(42, b"wrong").await;
+        firmware.source_output(0, b"right").await;
+        assert_eq!(camera.bytes().next().await.unwrap(), b"right");
     }
 
     #[tokio::test]
-    async fn legacy_console_stream_still_works_on_protocol_12() {
-        let (uplink, _uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console = Console::new(downlink, uplink, 12).await.unwrap();
-        let mut legacy = console.stream_no_history().await;
+    async fn text_flushes_incomplete_utf8_and_ends_on_disconnect() {
+        let (_console, firmware, mut camera) = connect_and_open_camera().await;
 
-        downlink_sender
-            .send_async(Packet::new(0, 0, b"legacy".to_vec()))
+        firmware.source_output(0, &[0xe2]).await;
+        drop(firmware.downlink);
+
+        let mut text = camera.text();
+        assert_eq!(text.next().await.unwrap(), "�");
+        assert_eq!(text.next().await, None);
+    }
+
+    #[tokio::test]
+    async fn shutdown_ends_every_stream_and_later_closes_report_disconnected() {
+        let (console, firmware, mut camera) = connect_and_open_camera().await;
+        let mut stm32 = console.open("cf:stm32").await.unwrap();
+
+        drop(firmware.downlink);
+        tokio::time::timeout(PATIENCE, console.shutdown())
             .await
-            .unwrap();
-        assert_eq!(legacy.next().await.unwrap(), "legacy");
+            .expect("Console shutdown did not join its tasks");
+
+        tokio::time::timeout(PATIENCE, async {
+            assert_eq!(camera.bytes().next().await, None);
+            assert_eq!(camera.text().next().await, None);
+            assert_eq!(camera.lines().next().await, None);
+            assert_eq!(stm32.lines().next().await, None);
+        })
+        .await
+        .expect("streams did not end after shutdown");
+        assert!(console.console_task.lock().await.is_none());
+        assert!(console.transaction_task.lock().await.is_none());
+
+        assert!(matches!(camera.close().await, Err(Error::Disconnected)));
+        stm32.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn handle_does_not_keep_the_worker_alive_after_the_console_is_gone() {
+        let (console, firmware, camera) = connect_and_open_camera().await;
+
+        drop(console);
+        tokio::time::timeout(PATIENCE, async {
+            while !firmware.uplink.is_disconnected() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the handle kept the worker alive");
+
+        assert!(matches!(camera.close().await, Err(Error::Disconnected)));
+    }
+
+    #[tokio::test]
+    async fn dropping_a_handle_after_the_console_is_gone_is_harmless() {
+        let (console, _firmware, camera) = connect_and_open_camera().await;
+
+        drop(console);
+        drop(camera);
+    }
+
+    #[test]
+    fn dropping_a_handle_needs_no_runtime() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (console, firmware, camera) = runtime.block_on(connect_and_open_camera());
+
+        runtime.shutdown_background();
+        drop(camera);
+        drop((console, firmware));
+    }
+
+    #[tokio::test]
+    async fn initialization_retries_eagain_error_response() {
+        let (downlink, uplink, firmware) = link();
+
+        let answer = async {
+            firmware
+                .expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, ALL_SOURCES, 0])
+                .await;
+            firmware
+                .send(
+                    CONTROL_CHANNEL,
+                    vec![CONTROL_SET_ENABLED, crate::firmware_errno::EAGAIN],
+                )
+                .await;
+            firmware.answer_control(ALL_SOURCES, 0).await;
+        };
+        let (console, ()) = join!(Console::new(downlink, uplink, 13), answer);
+        let _console = console.unwrap();
+        firmware.assert_silent().await;
+    }
+
+    #[tokio::test]
+    async fn initialization_rejects_malformed_response_and_stops_router() {
+        let (downlink, uplink, firmware) = link();
+
+        let answer = async {
+            let _ = firmware.uplink.recv_async().await.unwrap();
+            firmware
+                .send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 0, 0, 0])
+                .await;
+        };
+        let (result, ()) = join!(Console::new(downlink, uplink, 13), answer);
+        assert!(matches!(result, Err(Error::ProtocolError(_))));
+        assert_router_stopped(&firmware.downlink).await;
+    }
+
+    #[tokio::test]
+    async fn initialization_surfaces_firmware_rejection_and_stops_router() {
+        let (downlink, uplink, firmware) = link();
+
+        let answer = async {
+            let _ = firmware.uplink.recv_async().await.unwrap();
+            firmware
+                .send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 5])
+                .await;
+        };
+        let (result, ()) = join!(Console::new(downlink, uplink, 13), answer);
+        assert!(matches!(
+            result,
+            Err(Error::Console(ConsoleError::CommandRejected {
+                path: None,
+                enabled: false,
+                errno: 5,
+            }))
+        ));
+        assert_router_stopped(&firmware.downlink).await;
+    }
+
+    #[tokio::test]
+    async fn initialization_reports_uplink_closure_and_stops_router() {
+        let (downlink, uplink, firmware) = link();
+        drop(firmware.uplink);
+
+        let result = Console::new(downlink, uplink, 13).await;
+        assert!(matches!(result, Err(Error::Disconnected)));
+        assert_router_stopped(&firmware.downlink).await;
+    }
+
+    #[tokio::test]
+    async fn initialization_reports_control_downlink_closure() {
+        let (downlink, uplink, firmware) = link();
+        drop(firmware.downlink);
+
+        let result = Console::new(downlink, uplink, 13).await;
+        assert!(matches!(result, Err(Error::Disconnected)));
+    }
+
+    #[tokio::test]
+    async fn cancelling_initialization_stops_router() {
+        let (downlink, uplink, firmware) = link();
+
+        {
+            let construction = Console::new(downlink, uplink, 13);
+            tokio::pin!(construction);
+            tokio::select! {
+                () = firmware.expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, ALL_SOURCES, 0]) => {}
+                _ = construction.as_mut() => panic!("Console returned before initialization"),
+            }
+        }
+
+        assert_router_stopped(&firmware.downlink).await;
+    }
+
+    #[tokio::test]
+    async fn catalog_retries_info_while_firmware_is_not_ready() {
+        let (console, firmware) = connect().await;
+
+        let answer = async {
+            firmware.expect(CATALOG_CHANNEL, &[CATALOG_GET_INFO]).await;
+            firmware
+                .send(
+                    CATALOG_CHANNEL,
+                    vec![CATALOG_GET_INFO, crate::firmware_errno::EAGAIN],
+                )
+                .await;
+            firmware.answer_catalog(&[]).await;
+        };
+        let (paths, ()) = join!(console.list(), answer);
+        assert_eq!(paths.unwrap(), ["cf:stm32"]);
+    }
+
+    #[tokio::test]
+    async fn catalog_retries_items_while_firmware_is_not_ready() {
+        let (console, firmware) = connect().await;
+
+        let answer = async {
+            firmware.expect(CATALOG_CHANNEL, &[CATALOG_GET_INFO]).await;
+            firmware
+                .send(CATALOG_CHANNEL, vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0])
+                .await;
+            firmware
+                .expect(CATALOG_CHANNEL, &[CATALOG_GET_ITEM, 0])
+                .await;
+            firmware
+                .send(
+                    CATALOG_CHANNEL,
+                    vec![CATALOG_GET_ITEM, crate::firmware_errno::EAGAIN],
+                )
+                .await;
+            firmware
+                .expect(CATALOG_CHANNEL, &[CATALOG_GET_ITEM, 0])
+                .await;
+            firmware
+                .send(
+                    CATALOG_CHANNEL,
+                    [&[CATALOG_GET_ITEM, 0, 0], CAMERA.as_bytes()].concat(),
+                )
+                .await;
+        };
+        let (paths, ()) = join!(console.list(), answer);
+        assert_eq!(paths.unwrap(), ["cf:stm32", CAMERA]);
+    }
+
+    #[tokio::test]
+    async fn cancelling_discovery_does_not_desynchronize_later_discovery() {
+        let (console, firmware) = connect().await;
+
+        {
+            let discovery = console.list();
+            tokio::pin!(discovery);
+            tokio::select! {
+                () = firmware.expect(CATALOG_CHANNEL, &[CATALOG_GET_INFO]) => {}
+                result = discovery.as_mut() => panic!("list returned early: {result:?}"),
+            }
+        }
+        firmware
+            .send(CATALOG_CHANNEL, vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0])
+            .await;
+
+        let answer = async {
+            firmware
+                .expect(CATALOG_CHANNEL, &[CATALOG_GET_ITEM, 0])
+                .await;
+            firmware
+                .send(
+                    CATALOG_CHANNEL,
+                    [&[CATALOG_GET_ITEM, 0, 0], CAMERA.as_bytes()].concat(),
+                )
+                .await;
+        };
+        let (paths, ()) = join!(console.list(), answer);
+        assert_eq!(paths.unwrap(), ["cf:stm32", CAMERA]);
+        firmware.assert_silent().await;
+    }
+
+    #[tokio::test]
+    async fn catalog_rejects_a_path_with_an_empty_segment() {
+        let (console, firmware) = connect().await;
+
+        let (paths, ()) = join!(console.list(), firmware.answer_catalog(&["deck:"]));
+        assert!(matches!(paths, Err(Error::ProtocolError(_))));
+    }
+
+    #[tokio::test]
+    async fn catalog_rejects_duplicate_paths() {
+        let (console, firmware) = connect().await;
+
+        let (paths, ()) = join!(
+            console.list(),
+            firmware.answer_catalog(&["deck:duplicate", "deck:duplicate"])
+        );
+        assert!(matches!(paths, Err(Error::ProtocolError(_))));
+    }
+
+    #[tokio::test]
+    async fn catalog_reports_command_error_responses() {
+        let (console, firmware) = connect().await;
+
+        let answer = async {
+            firmware.expect(CATALOG_CHANNEL, &[CATALOG_GET_INFO]).await;
+            firmware
+                .send(CATALOG_CHANNEL, vec![CATALOG_GET_INFO, 0, 1, 0, 0, 0, 0])
+                .await;
+            firmware
+                .expect(CATALOG_CHANNEL, &[CATALOG_GET_ITEM, 0])
+                .await;
+            firmware
+                .send(CATALOG_CHANNEL, vec![CATALOG_GET_ITEM, 2])
+                .await;
+        };
+        let (paths, ()) = join!(console.list(), answer);
+        assert!(matches!(
+            paths,
+            Err(Error::Console(ConsoleError::CatalogCommandRejected {
+                operation: ConsoleCatalogOperation::GetItem(0),
+                errno: 2,
+            }))
+        ));
+    }
+
+    #[tokio::test]
+    async fn malformed_control_responses_are_protocol_errors() {
+        let (console, firmware) = connect().await;
+
+        let answer = async {
+            firmware.answer_catalog(&[CAMERA]).await;
+            firmware
+                .expect(CONTROL_CHANNEL, &[CONTROL_SET_ENABLED, 0, 1])
+                .await;
+            firmware
+                .send(CONTROL_CHANNEL, vec![CONTROL_SET_ENABLED, 0, 0, 0])
+                .await;
+        };
+        let (result, ()) = join!(console.open(CAMERA), answer);
+        assert!(matches!(result, Err(Error::ProtocolError(_))));
     }
 
     // The current-thread runtime routes the queued final reply and EOF before
     // waking the transaction worker to register the discovered sources.
     #[tokio::test]
     async fn disconnect_during_final_catalog_response_rejects_discovery() {
-        let (uplink, uplink_receiver) = channel::unbounded();
-        let (downlink_sender, downlink) = channel::unbounded();
-        let console =
-            new_initialized_console(downlink, uplink, &uplink_receiver, &downlink_sender).await;
-        let firmware = async move {
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(0, 3, vec![1, 0, 1, 0, 0, 0, 0]))
-                .await
-                .unwrap();
-            let _ = uplink_receiver.recv_async().await.unwrap();
-            downlink_sender
-                .send_async(Packet::new(
-                    0,
-                    3,
-                    [vec![0, 0, 0], b"deck:bcCam".to_vec()].concat(),
-                ))
-                .await
-                .unwrap();
-            drop(downlink_sender);
+        let (console, firmware) = connect().await;
+
+        let answer = async move {
+            firmware.answer_catalog(&[CAMERA]).await;
+            drop(firmware.downlink);
         };
-        let (catalog, ()) = join!(console.catalog(), firmware);
-        assert!(matches!(catalog, Err(Error::Disconnected)));
+        let (paths, ()) = join!(console.list(), answer);
+        assert!(matches!(paths, Err(Error::Disconnected)));
         console.shutdown().await;
     }
 }

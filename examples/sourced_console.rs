@@ -1,4 +1,3 @@
-use crazyflie_lib::subsystems::console::ConsoleHistory;
 use futures::StreamExt;
 
 #[tokio::main]
@@ -19,27 +18,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         crazyflie_lib::Crazyflie::connect_from_uri(&link_context, &uri, crazyflie_lib::NoTocCache)
             .await?;
 
-    let catalog = crazyflie.console.catalog().await?;
-    println!(
-        "Discovered {} sourced consoles (CRC: {:?})",
-        catalog.len(),
-        catalog.crc32()
-    );
-    for source in &catalog {
-        println!("  {}: {}", source.id().get(), source.path());
+    println!("Available consoles:");
+    for path in crazyflie.console.list().await? {
+        println!("  {path}");
     }
 
-    let source = catalog.find(&source_path).ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("Console source {source_path:?} was not found"),
-        )
-    })?;
-    let selector = source.selector();
-    let mut lines = source.line_stream(ConsoleHistory::Replay).await;
-    crazyflie.console.enable(selector).await?;
+    let mut console = crazyflie.console.open(&source_path).await?;
 
     println!("Showing {source_path}; press Ctrl-C to stop");
+    let mut lines = console.lines();
     loop {
         tokio::select! {
             line = lines.next() => match line {
@@ -49,8 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ = tokio::signal::ctrl_c() => break,
         }
     }
+    drop(lines);
 
-    crazyflie.console.disable(selector).await?;
+    console.close().await?;
     crazyflie.disconnect().await;
     Ok(())
 }
