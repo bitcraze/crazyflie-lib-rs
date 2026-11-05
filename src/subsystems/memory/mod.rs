@@ -75,11 +75,11 @@ impl MemoryDispatcher {
           if let Some(sender) = internal_senders.lock().await.get(&memory_id) {
             let _ = sender.send_async(pk).await;
           } else {
-            println!("Error: Received memory read response for unknown memory ID {}", memory_id);
+            log::error!("Received memory read response for unknown memory ID {}", memory_id);
             break;
           }
         } else {
-          println!("Error: Received packet on unexpected channel {}", pk.get_channel());
+          log::error!("Received packet on unexpected channel {}", pk.get_channel());
           break;
         }
       }
@@ -241,10 +241,10 @@ impl Memory {
         if guard.is_none() {
           *guard = Some(backend);
         } else {
-          println!("Warning: Attempted to close memory ID {} which is already closed", backend.memory_id);
+          log::warn!("Attempted to close memory ID {} which is already closed", backend.memory_id);
         }
       } else {
-        println!("Warning: Attempted to close memory ID {} which does not exist", backend.memory_id);
+        log::warn!("Attempted to close memory ID {} which does not exist", backend.memory_id);
       }
       Ok(())
     }
