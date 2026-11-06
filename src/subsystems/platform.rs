@@ -248,7 +248,7 @@ impl TryFrom<Vec<u8>> for AppChannelPacket {
         if value.len() <= APPCHANNEL_MTU {
             Ok(AppChannelPacket(value))
         } else {
-            Err(Error::AppchannelPacketTooLarge)
+            Err(Error::AppChannelPacketTooLarge)
         }
     }
 }
@@ -260,7 +260,7 @@ impl TryFrom<&[u8]> for AppChannelPacket {
         if value.len() <= APPCHANNEL_MTU {
             Ok(AppChannelPacket(value.to_vec()))
         } else {
-            Err(Error::AppchannelPacketTooLarge)
+            Err(Error::AppChannelPacketTooLarge)
         }
     }
 }

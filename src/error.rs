@@ -37,7 +37,7 @@ pub enum Error {
     /// Error with the async executors.
     SystemError(String),
     /// App channel packets should be no larger than [APPCHANNEL_MTU](crate::subsystems::platform::APPCHANNEL_MTU)
-    AppchannelPacketTooLarge,
+    AppChannelPacketTooLarge,
     /// Invalid argument passed to a function.
     /// This error indicates that one or more arguments provided to a function are invalid.
     InvalidArgument(String),
@@ -63,7 +63,7 @@ impl std::fmt::Display for Error {
             Error::Disconnected => write!(f, "Disconnected"),
             Error::VariableNotFound => write!(f, "Variable not found"),
             Error::SystemError(msg) => write!(f, "System error: {}", msg),
-            Error::AppchannelPacketTooLarge => write!(f, "Appchannel packet too large"),
+            Error::AppChannelPacketTooLarge => write!(f, "Appchannel packet too large"),
             Error::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
             Error::Timeout => write!(f, "Operation timed out"),
             Error::MemoryError(msg) => write!(f, "Memory error: {}", msg),
