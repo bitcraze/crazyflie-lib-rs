@@ -413,67 +413,119 @@ impl LighthouseMemory {
 
     /// Write geometry data for multiple base stations
     ///
+    /// Slots are written in ascending ID order. A slot that the firmware rejects
+    /// (it supports fewer base stations than the slot ID) is skipped and reported
+    /// in [`LighthouseWriteReport::rejected`]. Any other error, such as a lost
+    /// connection, stops the write and is returned.
+    ///
     /// # Arguments
     /// * `geometries` - A HashMap mapping base station ID to geometry data
-    pub async fn write_geometries(&self, geometries: &HashMap<u8, LighthouseBsGeometry>) -> Result<()> {
+    ///
+    /// # Returns
+    /// A report of which slots were written and which were rejected
+    pub async fn write_geometries(&self, geometries: &HashMap<u8, LighthouseBsGeometry>) -> Result<LighthouseWriteReport> {
         self.write_geometries_with_progress(geometries, |_, _| {}).await
     }
 
     /// Write geometry data for multiple base stations with progress reporting
     ///
+    /// See [`write_geometries`](Self::write_geometries) for how rejected slots are handled.
+    ///
     /// # Arguments
     /// * `geometries` - A HashMap mapping base station ID to geometry data
-    /// * `progress_callback` - Called with (completed_count, total_count) after each write
+    /// * `progress_callback` - Called with (completed_count, total_count) after each slot,
+    ///   whether it was written or rejected
     pub async fn write_geometries_with_progress<F>(
         &self,
         geometries: &HashMap<u8, LighthouseBsGeometry>,
         mut progress_callback: F,
-    ) -> Result<()>
+    ) -> Result<LighthouseWriteReport>
     where
         F: FnMut(usize, usize),
     {
-        let total = geometries.len();
-        let mut completed = 0;
+        let mut report = LighthouseWriteReport::default();
+        let mut bs_ids: Vec<u8> = geometries.keys().copied().collect();
+        bs_ids.sort_unstable();
 
-        for (&bs_id, geometry) in geometries {
-            self.write_geometry(bs_id, geometry).await?;
-            completed += 1;
-            progress_callback(completed, total);
+        for (completed, bs_id) in bs_ids.iter().copied().enumerate() {
+            let result = self.write_geometry(bs_id, &geometries[&bs_id]).await;
+            report.record(bs_id, result)?;
+            progress_callback(completed + 1, bs_ids.len());
         }
 
-        Ok(())
+        Ok(report)
     }
 
     /// Write calibration data for multiple base stations
     ///
+    /// Slots are written in ascending ID order. A slot that the firmware rejects
+    /// (it supports fewer base stations than the slot ID) is skipped and reported
+    /// in [`LighthouseWriteReport::rejected`]. Any other error, such as a lost
+    /// connection, stops the write and is returned.
+    ///
     /// # Arguments
     /// * `calibrations` - A HashMap mapping base station ID to calibration data
-    pub async fn write_calibrations(&self, calibrations: &HashMap<u8, LighthouseBsCalibration>) -> Result<()> {
+    ///
+    /// # Returns
+    /// A report of which slots were written and which were rejected
+    pub async fn write_calibrations(&self, calibrations: &HashMap<u8, LighthouseBsCalibration>) -> Result<LighthouseWriteReport> {
         self.write_calibrations_with_progress(calibrations, |_, _| {}).await
     }
 
     /// Write calibration data for multiple base stations with progress reporting
     ///
+    /// See [`write_calibrations`](Self::write_calibrations) for how rejected slots are handled.
+    ///
     /// # Arguments
     /// * `calibrations` - A HashMap mapping base station ID to calibration data
-    /// * `progress_callback` - Called with (completed_count, total_count) after each write
+    /// * `progress_callback` - Called with (completed_count, total_count) after each slot,
+    ///   whether it was written or rejected
     pub async fn write_calibrations_with_progress<F>(
         &self,
         calibrations: &HashMap<u8, LighthouseBsCalibration>,
         mut progress_callback: F,
-    ) -> Result<()>
+    ) -> Result<LighthouseWriteReport>
     where
         F: FnMut(usize, usize),
     {
-        let total = calibrations.len();
-        let mut completed = 0;
+        let mut report = LighthouseWriteReport::default();
+        let mut bs_ids: Vec<u8> = calibrations.keys().copied().collect();
+        bs_ids.sort_unstable();
 
-        for (&bs_id, calibration) in calibrations {
-            self.write_calibration(bs_id, calibration).await?;
-            completed += 1;
-            progress_callback(completed, total);
+        for (completed, bs_id) in bs_ids.iter().copied().enumerate() {
+            let result = self.write_calibration(bs_id, &calibrations[&bs_id]).await;
+            report.record(bs_id, result)?;
+            progress_callback(completed + 1, bs_ids.len());
         }
 
+        Ok(report)
+    }
+}
+
+/// Result of writing several lighthouse memory slots
+///
+/// Returned by [`LighthouseMemory::write_geometries`] and
+/// [`LighthouseMemory::write_calibrations`]. Use [`written`](Self::written)
+/// to decide which slots to persist with
+/// [`persist_lighthouse_data`](crate::subsystems::localization::Lighthouse::persist_lighthouse_data).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LighthouseWriteReport {
+    /// Base station IDs that were written, in ascending order
+    pub written: Vec<u8>,
+    /// Base station IDs the firmware rejected because it does not support
+    /// that many base stations, in ascending order
+    pub rejected: Vec<u8>,
+}
+
+impl LighthouseWriteReport {
+    /// Record the outcome of one slot write. Returns errors other than a rejected slot.
+    fn record(&mut self, bs_id: u8, result: Result<()>) -> Result<()> {
+        match result {
+            Ok(()) => self.written.push(bs_id),
+            // The firmware answers with an error status for slots it does not support
+            Err(Error::MemoryError(_)) => self.rejected.push(bs_id),
+            Err(e) => return Err(e),
+        }
         Ok(())
     }
 }
