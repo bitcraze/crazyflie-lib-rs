@@ -3,6 +3,8 @@ use std::array::TryFromSliceError;
 use crazyflie_link::Packet;
 use futures::task::SpawnError;
 
+use crate::subsystems::console::ConsoleError;
+
 /// [Result] alias for return types of the crate API
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -26,6 +28,8 @@ pub enum Error {
     ParamError(String),
     /// Log Subsystem error. The String contains the reason.
     LogError(String),
+    /// Sourced Console subsystem error.
+    Console(ConsoleError),
     /// [Value](crate::Value) conversion error. The String contains the reason.
     ConversionError(String),
     /// Crazyflie link configuration error. Returns the [error from the Link](crazyflie_link::Error).
@@ -52,12 +56,21 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::ProtocolVersionNotSupported { min_supported, max_supported, found } => {
-                write!(f, "Protocol version not supported: supported range is {}-{}, found {}", min_supported, max_supported, found)
+            Error::ProtocolVersionNotSupported {
+                min_supported,
+                max_supported,
+                found,
+            } => {
+                write!(
+                    f,
+                    "Protocol version not supported: supported range is {}-{}, found {}",
+                    min_supported, max_supported, found
+                )
             }
             Error::ProtocolError(msg) => write!(f, "Protocol error: {}", msg),
             Error::ParamError(msg) => write!(f, "Parameter error: {}", msg),
             Error::LogError(msg) => write!(f, "Log error: {}", msg),
+            Error::Console(error) => write!(f, "Console error: {error}"),
             Error::ConversionError(msg) => write!(f, "Conversion error: {}", msg),
             Error::LinkError(e) => write!(f, "Link error: {}", e),
             Error::Disconnected => write!(f, "Disconnected"),
