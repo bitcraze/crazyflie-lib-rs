@@ -229,11 +229,11 @@ impl Param {
 
                             notify_watchers(&watchers, param.clone(), value).await;
                         } else {
-                            println!("Error: Malformed param update");
+                            log::error!("Malformed param update");
                             break;
                         }
                     } else {
-                        println!("Error: malformed param update");
+                        log::error!("malformed param update");
                         break;
                     }
                 } else {
