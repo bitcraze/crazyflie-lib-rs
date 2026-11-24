@@ -55,7 +55,7 @@
 
 use crazyflie_link::Packet;
 use flume::{Receiver, Sender};
-use async_broadcast::{broadcast, Receiver as BroadcastReceiver};
+use async_broadcast::{broadcast, InactiveReceiver, Receiver as BroadcastReceiver};
 use futures::Stream;
 use half::f16;
 
@@ -143,10 +143,14 @@ impl Localization {
         let (mut matched_angle_broadcast, matched_angle_receiver) = broadcast(100);
         let (mut persist_broadcast, persist_receiver) = broadcast(10);
 
-        // Enable overflow mode so old messages are dropped instead of blocking
+        // Enable overflow mode so old messages are dropped instead of blocking,
+        // and don't wait for a receiver: with none active, messages are dropped
         angle_broadcast.set_overflow(true);
+        angle_broadcast.set_await_active(false);
         matched_angle_broadcast.set_overflow(true);
+        matched_angle_broadcast.set_await_active(false);
         persist_broadcast.set_overflow(true);
+        persist_broadcast.set_await_active(false);
 
         // Spawn background task to process incoming localization packets
         tokio::spawn(async move {
@@ -180,9 +184,11 @@ impl Localization {
 
         let lighthouse = Lighthouse {
             uplink: uplink.clone(),
-            angle_stream_receiver: angle_receiver,
-            matched_angle_stream_receiver: matched_angle_receiver,
-            persist_receiver,
+            // Keep only inactive receivers, so no packets queue up until a
+            // stream is requested
+            angle_stream_receiver: angle_receiver.deactivate(),
+            matched_angle_stream_receiver: matched_angle_receiver.deactivate(),
+            persist_receiver: persist_receiver.deactivate(),
         };
 
         let loco_positioning = LocoPositioning { uplink: uplink.clone() };
@@ -373,9 +379,9 @@ impl LocoPositioning {
 /// lighthouse base station configuration persistence.
 pub struct Lighthouse {
     uplink: Sender<Packet>,
-    angle_stream_receiver: BroadcastReceiver<LighthouseAngleData>,
-    matched_angle_stream_receiver: BroadcastReceiver<LighthouseMatchedAngleData>,
-    persist_receiver: BroadcastReceiver<bool>,
+    angle_stream_receiver: InactiveReceiver<LighthouseAngleData>,
+    matched_angle_stream_receiver: InactiveReceiver<LighthouseMatchedAngleData>,
+    persist_receiver: InactiveReceiver<bool>,
 }
 
 impl Lighthouse {
@@ -388,15 +394,18 @@ impl Lighthouse {
     /// To enable the angle stream, set the parameter `locSrv.enLhAngleStream` to 1
     /// on the Crazyflie.
     ///
+    /// The stream only yields data received after this call.
+    ///
     /// # Example
     /// ```no_run
     /// # use crazyflie_lib::Crazyflie;
     /// # use futures::StreamExt;
     /// # async fn example(crazyflie: &Crazyflie) -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut angle_stream = crazyflie.localization.lighthouse.angle_stream().await;
+    ///
     /// // Enable angle streaming
     /// crazyflie.param.set("locSrv.enLhAngleStream", 1u8).await?;
     ///
-    /// let mut angle_stream = crazyflie.localization.lighthouse.angle_stream().await;
     /// while let Some(data) = angle_stream.next().await {
     ///     println!("Base station {}: x={:?}, y={:?}",
     ///         data.base_station, data.angles.x, data.angles.y);
@@ -405,7 +414,7 @@ impl Lighthouse {
     /// # }
     /// ```
     pub async fn angle_stream(&self) -> impl Stream<Item = LighthouseAngleData> + use<> {
-        self.angle_stream_receiver.clone()
+        self.angle_stream_receiver.activate_cloned()
     }
 
     /// Get a stream of matched lighthouse angle measurements
@@ -420,6 +429,8 @@ impl Lighthouse {
     /// - `locSrv.enLhMtchStm`: number of groups to send (0 = off, 255 = continuous)
     /// - `locSrv.minBsLhMtchStm`: minimum number of base stations in a group
     /// - `locSrv.maxTimeLhMtchStm`: maximum time span of a group (ms)
+    ///
+    /// The stream only yields data received after this call.
     ///
     /// # Example
     /// ```no_run
@@ -440,7 +451,7 @@ impl Lighthouse {
     /// # }
     /// ```
     pub async fn matched_angle_stream(&self) -> impl Stream<Item = LighthouseMatchedAngleData> + use<> {
-        self.matched_angle_stream_receiver.clone()
+        self.matched_angle_stream_receiver.activate_cloned()
     }
 
     /// Persist lighthouse geometry and calibration data to permanent storage
@@ -474,8 +485,10 @@ impl Lighthouse {
     /// # }
     /// ```
     pub async fn persist_lighthouse_data(&self, geo_list: &[u8], calib_list: &[u8]) -> Result<bool> {
+        // Listen before sending, so the confirmation can't arrive unseen
+        let receiver = self.persist_receiver.activate_cloned();
         self.send_lh_persist_data_packet(geo_list, calib_list).await?;
-        self.wait_persist_confirmation().await
+        Self::wait_persist_confirmation(receiver).await
     }
 
     /// Wait for lighthouse persistence confirmation
@@ -487,8 +500,7 @@ impl Lighthouse {
     /// Returns `Ok(true)` if data was successfully persisted, `Ok(false)` if
     /// persistence failed, or an error if no confirmation is received within
     /// the timeout.
-    async fn wait_persist_confirmation(&self) -> Result<bool> {
-        let mut receiver = self.persist_receiver.clone();
+    async fn wait_persist_confirmation(mut receiver: BroadcastReceiver<bool>) -> Result<bool> {
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             receiver.recv()
@@ -548,5 +560,64 @@ impl Lighthouse {
         let pk = Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::StreamExt;
+    use std::time::Duration;
+
+    fn angle_packet(base_station: u8) -> Packet {
+        let mut data = vec![LH_ANGLE_STREAM, base_station];
+        data.extend_from_slice(&[0; 20]);
+        Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, data)
+    }
+
+    fn persist_packet(success: bool) -> Packet {
+        Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, vec![LH_PERSIST_DATA, success as u8])
+    }
+
+    /// Wait until the background task has handled all packets sent so far
+    async fn drain(downlink: &Sender<Packet>) {
+        while !downlink.is_empty() {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    #[tokio::test]
+    async fn angle_stream_skips_packets_from_before_it_was_created() {
+        let (uplink, _uplink_rx) = flume::unbounded();
+        let (downlink, downlink_rx) = flume::unbounded();
+        let localization = Localization::new(uplink, downlink_rx);
+
+        downlink.send_async(angle_packet(1)).await.unwrap();
+        drain(&downlink).await;
+
+        let mut stream = localization.lighthouse.angle_stream().await;
+        downlink.send_async(angle_packet(2)).await.unwrap();
+
+        let data = tokio::time::timeout(Duration::from_secs(1), stream.next()).await.unwrap().unwrap();
+        assert_eq!(data.base_station, 2);
+    }
+
+    #[tokio::test]
+    async fn persist_ignores_confirmations_from_before_the_request() {
+        let (uplink, uplink_rx) = flume::unbounded();
+        let (downlink, downlink_rx) = flume::unbounded();
+        let localization = Localization::new(uplink, downlink_rx);
+
+        // A stale failure from an earlier persist request
+        downlink.send_async(persist_packet(false)).await.unwrap();
+        drain(&downlink).await;
+
+        // Answer the persist request with success
+        tokio::spawn(async move {
+            uplink_rx.recv_async().await.unwrap();
+            downlink.send_async(persist_packet(true)).await.unwrap();
+        });
+
+        assert!(localization.lighthouse.persist_lighthouse_data(&[0], &[0]).await.unwrap());
     }
 }
