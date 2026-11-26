@@ -55,7 +55,7 @@
 
 use crazyflie_link::Packet;
 use flume::{Receiver, Sender};
-use async_broadcast::{broadcast, Receiver as BroadcastReceiver};
+use async_broadcast::{broadcast, InactiveReceiver, Receiver as BroadcastReceiver};
 use futures::Stream;
 use half::f16;
 
@@ -82,6 +82,7 @@ const EXT_POSE: u8 = 8;
 const _EXT_POSE_PACKED: u8 = 9;
 const LH_ANGLE_STREAM: u8 = 10;
 const LH_PERSIST_DATA: u8 = 11;
+const LH_MATCHED_ANGLE_STREAM: u8 = 12;
 
 /// Lighthouse angle sweep data
 #[derive(Debug, Clone)]
@@ -90,6 +91,23 @@ pub struct LighthouseAngleData {
     pub base_station: u8,
     /// Angle measurements
     pub angles: LighthouseAngles,
+}
+
+/// Lighthouse sweep angle data from the matched angle stream
+///
+/// The Crazyflie sends one packet per base station. Packets that were sampled
+/// at the same time share a `group_id`, and `bs_count` tells how many packets
+/// belong to the group.
+#[derive(Debug, Clone)]
+pub struct LighthouseMatchedAngleData {
+    /// Base station ID
+    pub base_station: u8,
+    /// Angle measurements
+    pub angles: LighthouseAngles,
+    /// Group ID (0-15, wraps around)
+    pub group_id: u8,
+    /// Number of base stations in the group
+    pub bs_count: u8,
 }
 
 /// Lighthouse sweep angles for all 4 sensors
@@ -122,11 +140,17 @@ impl Localization {
         let external_pose = ExternalPose { uplink: uplink.clone() };
 
         let (mut angle_broadcast, angle_receiver) = broadcast(100);
+        let (mut matched_angle_broadcast, matched_angle_receiver) = broadcast(100);
         let (mut persist_broadcast, persist_receiver) = broadcast(10);
 
-        // Enable overflow mode so old messages are dropped instead of blocking
+        // Enable overflow mode so old messages are dropped instead of blocking,
+        // and don't wait for a receiver: with none active, messages are dropped
         angle_broadcast.set_overflow(true);
+        angle_broadcast.set_await_active(false);
+        matched_angle_broadcast.set_overflow(true);
+        matched_angle_broadcast.set_await_active(false);
         persist_broadcast.set_overflow(true);
+        persist_broadcast.set_await_active(false);
 
         // Spawn background task to process incoming localization packets
         tokio::spawn(async move {
@@ -144,6 +168,11 @@ impl Localization {
                             let _ = angle_broadcast.broadcast(angle_data).await;
                         }
                     }
+                    LH_MATCHED_ANGLE_STREAM => {
+                        if let Ok(angle_data) = decode_matched_lh_angle(data) {
+                            let _ = matched_angle_broadcast.broadcast(angle_data).await;
+                        }
+                    }
                     LH_PERSIST_DATA if !data.is_empty() => {
                         let success = data[0] != 0;
                         let _ = persist_broadcast.broadcast(success).await;
@@ -155,8 +184,11 @@ impl Localization {
 
         let lighthouse = Lighthouse {
             uplink: uplink.clone(),
-            angle_stream_receiver: angle_receiver,
-            persist_receiver,
+            // Keep only inactive receivers, so no packets queue up until a
+            // stream is requested
+            angle_stream_receiver: angle_receiver.deactivate(),
+            matched_angle_stream_receiver: matched_angle_receiver.deactivate(),
+            persist_receiver: persist_receiver.deactivate(),
         };
 
         let loco_positioning = LocoPositioning { uplink: uplink.clone() };
@@ -182,39 +214,46 @@ fn decode_lh_angle(data: &[u8]) -> Result<LighthouseAngleData> {
         return Err(Error::ProtocolError("LH_ANGLE_STREAM packet too short".to_owned()));
     }
 
-    let base_station = data[0];
-
-    // Read x[0] as f32
-    let x0 = f32::from_le_bytes([data[1], data[2], data[3], data[4]]);
-
-    // Read x diffs as i16 and convert from fp16
-    let x1_diff_i16 = i16::from_le_bytes([data[5], data[6]]);
-    let x2_diff_i16 = i16::from_le_bytes([data[7], data[8]]);
-    let x3_diff_i16 = i16::from_le_bytes([data[9], data[10]]);
-
-    let x1 = x0 - f16::from_bits(x1_diff_i16 as u16).to_f32();
-    let x2 = x0 - f16::from_bits(x2_diff_i16 as u16).to_f32();
-    let x3 = x0 - f16::from_bits(x3_diff_i16 as u16).to_f32();
-
-    // Read y[0] as f32
-    let y0 = f32::from_le_bytes([data[11], data[12], data[13], data[14]]);
-
-    // Read y diffs as i16 and convert from fp16
-    let y1_diff_i16 = i16::from_le_bytes([data[15], data[16]]);
-    let y2_diff_i16 = i16::from_le_bytes([data[17], data[18]]);
-    let y3_diff_i16 = i16::from_le_bytes([data[19], data[20]]);
-
-    let y1 = y0 - f16::from_bits(y1_diff_i16 as u16).to_f32();
-    let y2 = y0 - f16::from_bits(y2_diff_i16 as u16).to_f32();
-    let y3 = y0 - f16::from_bits(y3_diff_i16 as u16).to_f32();
-
     Ok(LighthouseAngleData {
-        base_station,
-        angles: LighthouseAngles {
-            x: [x0, x1, x2, x3],
-            y: [y0, y1, y2, y3],
-        },
+        base_station: data[0],
+        angles: decode_lh_angles(&data[1..21]),
     })
+}
+
+/// Decode lighthouse matched angle stream packet
+///
+/// Packet format: '<BfhhhfhhhB'
+/// - Same as [decode_lh_angle], followed by
+/// - B: group ID (upper 4 bits) and base station count (lower 4 bits)
+fn decode_matched_lh_angle(data: &[u8]) -> Result<LighthouseMatchedAngleData> {
+    if data.len() < 22 {
+        return Err(Error::ProtocolError("LH_MATCHED_ANGLE_STREAM packet too short".to_owned()));
+    }
+
+    Ok(LighthouseMatchedAngleData {
+        base_station: data[0],
+        angles: decode_lh_angles(&data[1..21]),
+        group_id: data[21] >> 4,
+        bs_count: data[21] & 0x0F,
+    })
+}
+
+/// Decode the 20 bytes of sweep angles shared by the angle stream packets
+fn decode_lh_angles(data: &[u8]) -> LighthouseAngles {
+    // Each sweep is the first sensor's angle as f32, followed by the
+    // differences to the other 3 sensors as int16 fp16
+    let decode_sweep = |d: &[u8]| -> [f32; 4] {
+        let first = f32::from_le_bytes([d[0], d[1], d[2], d[3]]);
+        let other = |offset: usize| {
+            first - f16::from_bits(u16::from_le_bytes([d[offset], d[offset + 1]])).to_f32()
+        };
+        [first, other(4), other(6), other(8)]
+    };
+
+    LighthouseAngles {
+        x: decode_sweep(&data[0..10]),
+        y: decode_sweep(&data[10..20]),
+    }
 }
 
 /// Emergency control interface
@@ -340,8 +379,9 @@ impl LocoPositioning {
 /// lighthouse base station configuration persistence.
 pub struct Lighthouse {
     uplink: Sender<Packet>,
-    angle_stream_receiver: BroadcastReceiver<LighthouseAngleData>,
-    persist_receiver: BroadcastReceiver<bool>,
+    angle_stream_receiver: InactiveReceiver<LighthouseAngleData>,
+    matched_angle_stream_receiver: InactiveReceiver<LighthouseMatchedAngleData>,
+    persist_receiver: InactiveReceiver<bool>,
 }
 
 impl Lighthouse {
@@ -354,15 +394,18 @@ impl Lighthouse {
     /// To enable the angle stream, set the parameter `locSrv.enLhAngleStream` to 1
     /// on the Crazyflie.
     ///
+    /// The stream only yields data received after this call.
+    ///
     /// # Example
     /// ```no_run
     /// # use crazyflie_lib::Crazyflie;
     /// # use futures::StreamExt;
     /// # async fn example(crazyflie: &Crazyflie) -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut angle_stream = crazyflie.localization.lighthouse.angle_stream().await;
+    ///
     /// // Enable angle streaming
     /// crazyflie.param.set("locSrv.enLhAngleStream", 1u8).await?;
     ///
-    /// let mut angle_stream = crazyflie.localization.lighthouse.angle_stream().await;
     /// while let Some(data) = angle_stream.next().await {
     ///     println!("Base station {}: x={:?}, y={:?}",
     ///         data.base_station, data.angles.x, data.angles.y);
@@ -371,7 +414,44 @@ impl Lighthouse {
     /// # }
     /// ```
     pub async fn angle_stream(&self) -> impl Stream<Item = LighthouseAngleData> + use<> {
-        self.angle_stream_receiver.clone()
+        self.angle_stream_receiver.activate_cloned()
+    }
+
+    /// Get a stream of matched lighthouse angle measurements
+    ///
+    /// Returns a Stream that yields [LighthouseMatchedAngleData] whenever matched
+    /// lighthouse sweep angle data is received from the Crazyflie. Unlike
+    /// [angle_stream](Self::angle_stream), packets are sent in groups of samples
+    /// from several base stations taken at about the same time, which is what
+    /// geometry estimation needs.
+    ///
+    /// The stream is controlled by these parameters on the Crazyflie:
+    /// - `locSrv.enLhMtchStm`: number of groups to send (0 = off, 255 = continuous)
+    /// - `locSrv.minBsLhMtchStm`: minimum number of base stations in a group
+    /// - `locSrv.maxTimeLhMtchStm`: maximum time span of a group (ms)
+    ///
+    /// The stream only yields data received after this call.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use crazyflie_lib::Crazyflie;
+    /// # use futures::StreamExt;
+    /// # async fn example(crazyflie: &Crazyflie) -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut angle_stream = crazyflie.localization.lighthouse.matched_angle_stream().await;
+    ///
+    /// // Send groups with at least 2 base stations continuously
+    /// crazyflie.param.set("locSrv.minBsLhMtchStm", 2u8).await?;
+    /// crazyflie.param.set("locSrv.enLhMtchStm", 255u8).await?;
+    ///
+    /// while let Some(data) = angle_stream.next().await {
+    ///     println!("Group {} ({} base stations), base station {}: x={:?}, y={:?}",
+    ///         data.group_id, data.bs_count, data.base_station, data.angles.x, data.angles.y);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn matched_angle_stream(&self) -> impl Stream<Item = LighthouseMatchedAngleData> + use<> {
+        self.matched_angle_stream_receiver.activate_cloned()
     }
 
     /// Persist lighthouse geometry and calibration data to permanent storage
@@ -405,8 +485,10 @@ impl Lighthouse {
     /// # }
     /// ```
     pub async fn persist_lighthouse_data(&self, geo_list: &[u8], calib_list: &[u8]) -> Result<bool> {
+        // Listen before sending, so the confirmation can't arrive unseen
+        let receiver = self.persist_receiver.activate_cloned();
         self.send_lh_persist_data_packet(geo_list, calib_list).await?;
-        self.wait_persist_confirmation().await
+        Self::wait_persist_confirmation(receiver).await
     }
 
     /// Wait for lighthouse persistence confirmation
@@ -418,8 +500,7 @@ impl Lighthouse {
     /// Returns `Ok(true)` if data was successfully persisted, `Ok(false)` if
     /// persistence failed, or an error if no confirmation is received within
     /// the timeout.
-    async fn wait_persist_confirmation(&self) -> Result<bool> {
-        let mut receiver = self.persist_receiver.clone();
+    async fn wait_persist_confirmation(mut receiver: BroadcastReceiver<bool>) -> Result<bool> {
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             receiver.recv()
@@ -479,5 +560,64 @@ impl Lighthouse {
         let pk = Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, payload);
         self.uplink.send_async(pk).await.map_err(|_| Error::Disconnected)?;
         Ok(())
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::StreamExt;
+    use std::time::Duration;
+
+    fn angle_packet(base_station: u8) -> Packet {
+        let mut data = vec![LH_ANGLE_STREAM, base_station];
+        data.extend_from_slice(&[0; 20]);
+        Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, data)
+    }
+
+    fn persist_packet(success: bool) -> Packet {
+        Packet::new(LOCALIZATION_PORT, GENERIC_CHANNEL, vec![LH_PERSIST_DATA, success as u8])
+    }
+
+    /// Wait until the background task has handled all packets sent so far
+    async fn drain(downlink: &Sender<Packet>) {
+        while !downlink.is_empty() {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    #[tokio::test]
+    async fn angle_stream_skips_packets_from_before_it_was_created() {
+        let (uplink, _uplink_rx) = flume::unbounded();
+        let (downlink, downlink_rx) = flume::unbounded();
+        let localization = Localization::new(uplink, downlink_rx);
+
+        downlink.send_async(angle_packet(1)).await.unwrap();
+        drain(&downlink).await;
+
+        let mut stream = localization.lighthouse.angle_stream().await;
+        downlink.send_async(angle_packet(2)).await.unwrap();
+
+        let data = tokio::time::timeout(Duration::from_secs(1), stream.next()).await.unwrap().unwrap();
+        assert_eq!(data.base_station, 2);
+    }
+
+    #[tokio::test]
+    async fn persist_ignores_confirmations_from_before_the_request() {
+        let (uplink, uplink_rx) = flume::unbounded();
+        let (downlink, downlink_rx) = flume::unbounded();
+        let localization = Localization::new(uplink, downlink_rx);
+
+        // A stale failure from an earlier persist request
+        downlink.send_async(persist_packet(false)).await.unwrap();
+        drain(&downlink).await;
+
+        // Answer the persist request with success
+        tokio::spawn(async move {
+            uplink_rx.recv_async().await.unwrap();
+            downlink.send_async(persist_packet(true)).await.unwrap();
+        });
+
+        assert!(localization.lighthouse.persist_lighthouse_data(&[0], &[0]).await.unwrap());
     }
 }

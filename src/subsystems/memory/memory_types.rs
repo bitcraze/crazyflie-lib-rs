@@ -33,7 +33,7 @@ async fn drain_in_flight(downlink: &channel::Receiver<Packet>, count: usize) {
 /// Validate a memory read response and return its payload bytes.
 fn parse_read_response(pk_data: &[u8], expected_len: usize, chunk_address: usize) -> Result<&[u8]> {
     if pk_data.len() < 6 {
-        return Err(Error::MemoryError("Malformed memory read response".into()));
+        return Err(Error::ProtocolError("Malformed memory read response".into()));
     }
     let status = pk_data[5];
     if status != 0 {
@@ -43,7 +43,7 @@ fn parse_read_response(pk_data: &[u8], expected_len: usize, chunk_address: usize
     }
     let read_data = &pk_data[6..];
     if read_data.len() != expected_len {
-        return Err(Error::MemoryError(format!(
+        return Err(Error::ProtocolError(format!(
             "Unexpected memory read response length @ {}: expected {} bytes, got {}",
             chunk_address, expected_len, read_data.len()
         )));
@@ -54,7 +54,7 @@ fn parse_read_response(pk_data: &[u8], expected_len: usize, chunk_address: usize
 /// Validate a memory write response (ack).
 fn parse_write_response(pk_data: &[u8], chunk_address: usize) -> Result<()> {
     if pk_data.len() < 6 {
-        return Err(Error::MemoryError("Malformed memory write response".into()));
+        return Err(Error::ProtocolError("Malformed memory write response".into()));
     }
     let status = pk_data[5];
     if status != 0 {
